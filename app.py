@@ -17,7 +17,7 @@ st.set_page_config(
 
 # Título principal
 st.title("📄 Sistema de Documentación con Búsqueda Avanzada")
-st.markdown("Busca documentos por nombre, autor o contenido")
+st.markdown("Busca documentos por nombre, CI, identificación, autor o contenido")
 st.markdown("---")
 
 # Sidebar para configuración
@@ -101,6 +101,10 @@ def buscar_documentos(db, criterio_busqueda, tipo_busqueda):
             query["tags"] = {"$in": [criterio_busqueda]}
         elif tipo_busqueda == "categoria":
             query["categoria"] = {"$regex": criterio_busqueda, "$options": "i"}
+        elif tipo_busqueda == "identificacion":
+            query["identificacion"] = {"$regex": criterio_busqueda, "$options": "i"}
+        elif tipo_busqueda == "ci":
+            query["ci"] = {"$regex": criterio_busqueda, "$options": "i"}
         
         documentos = list(db.documentos.find(query).sort("fecha_creacion", -1))
         return documentos, None
@@ -123,20 +127,22 @@ if mongo_uri:
         with col1:
             criterio_busqueda = st.text_input(
                 "Buscar documentos",
-                placeholder="Ej: guía instalación, juan, API...",
+                placeholder="Ej: guía instalación, juan, 12345678...",
                 key="busqueda_principal"
             )
         
         with col2:
             tipo_busqueda = st.selectbox(
                 "Buscar por:",
-                ["nombre", "autor", "contenido", "tags", "categoria"],
+                ["nombre", "autor", "contenido", "tags", "categoria", "identificacion", "ci"],
                 format_func=lambda x: {
                     "nombre": "📄 Nombre del documento",
                     "autor": "👤 Autor", 
                     "contenido": "📝 Contenido",
                     "tags": "🏷️ Tags",
-                    "categoria": "📂 Categoría"
+                    "categoria": "📂 Categoría",
+                    "identificacion": "🆔 Identificación",
+                    "ci": "🔢 CI/Cédula"
                 }[x]
             )
         
@@ -171,6 +177,8 @@ if mongo_uri:
                                 st.write(f"**Versión:** {doc['version']}")
                                 st.write(f"**Tags:** {', '.join(doc['tags']) if doc['tags'] else 'Ninguno'}")
                                 st.write(f"**Prioridad:** {doc['prioridad']}")
+                                st.write(f"**Identificación:** {doc.get('identificacion', 'No especificada')}")
+                                st.write(f"**CI/Cédula:** {doc.get('ci', 'No especificada')}")
                                 
                                 if doc.get('tipo') == 'texto':
                                     st.write("---")
@@ -219,8 +227,10 @@ if mongo_uri:
                         key="texto_categoria"
                     )
                     autor = st.text_input("Autor*", placeholder="Tu nombre", key="texto_autor")
+                    identificacion = st.text_input("Identificación*", placeholder="Ej: EMP-001, CLT-2024", key="texto_identificacion")
                     
                 with col2:
+                    ci = st.text_input("CI/Cédula*", placeholder="Número de cédula", key="texto_ci")
                     version = st.text_input("Versión", value="1.0", key="texto_version")
                     tags_input = st.text_input("Tags", placeholder="python,documentación,sistema", key="texto_tags")
                     prioridad = st.select_slider("Prioridad", options=["Baja", "Media", "Alta"], key="texto_prioridad")
@@ -235,7 +245,7 @@ if mongo_uri:
                 submitted_texto = st.form_submit_button("💾 Guardar Documento de Texto")
                 
                 if submitted_texto:
-                    if titulo and contenido and autor:
+                    if titulo and contenido and autor and identificacion and ci:
                         tags = [tag.strip() for tag in tags_input.split(",")] if tags_input else []
                         
                         documento = {
@@ -243,6 +253,8 @@ if mongo_uri:
                             "contenido": contenido,
                             "categoria": categoria,
                             "autor": autor,
+                            "identificacion": identificacion,
+                            "ci": ci,
                             "version": version,
                             "tags": tags,
                             "prioridad": prioridad,
@@ -275,8 +287,10 @@ if mongo_uri:
                         key="pdf_categoria"
                     )
                     autor_pdf = st.text_input("Autor*", placeholder="Tu nombre", key="pdf_autor")
+                    identificacion_pdf = st.text_input("Identificación*", placeholder="Ej: EMP-001, CLT-2024", key="pdf_identificacion")
                     
                 with col2:
+                    ci_pdf = st.text_input("CI/Cédula*", placeholder="Número de cédula", key="pdf_ci")
                     version_pdf = st.text_input("Versión", value="1.0", key="pdf_version")
                     tags_pdf = st.text_input("Tags", placeholder="pdf,manual,usuario", key="pdf_tags")
                     prioridad_pdf = st.select_slider("Prioridad", options=["Baja", "Media", "Alta"], key="pdf_prioridad")
@@ -296,7 +310,7 @@ if mongo_uri:
                 submitted_pdf = st.form_submit_button("📄 Subir PDF")
                 
                 if submitted_pdf:
-                    if titulo_pdf and archivo_pdf and autor_pdf:
+                    if titulo_pdf and archivo_pdf and autor_pdf and identificacion_pdf and ci_pdf:
                         contenido_pdf = procesar_pdf(archivo_pdf)
                         
                         if contenido_pdf:
@@ -305,6 +319,8 @@ if mongo_uri:
                                 "descripcion": descripcion_pdf,
                                 "categoria": categoria_pdf,
                                 "autor": autor_pdf,
+                                "identificacion": identificacion_pdf,
+                                "ci": ci_pdf,
                                 "version": version_pdf,
                                 "tags": [tag.strip() for tag in tags_pdf.split(",")] if tags_pdf else [],
                                 "prioridad": prioridad_pdf,
@@ -340,8 +356,10 @@ if mongo_uri:
                         key="word_categoria"
                     )
                     autor_word = st.text_input("Autor*", placeholder="Tu nombre", key="word_autor")
+                    identificacion_word = st.text_input("Identificación*", placeholder="Ej: EMP-001, CLT-2024", key="word_identificacion")
                     
                 with col2:
+                    ci_word = st.text_input("CI/Cédula*", placeholder="Número de cédula", key="word_ci")
                     version_word = st.text_input("Versión", value="1.0", key="word_version")
                     tags_word = st.text_input("Tags", placeholder="word,reporte,tecnico", key="word_tags")
                     prioridad_word = st.select_slider("Prioridad", options=["Baja", "Media", "Alta"], key="word_prioridad")
@@ -361,7 +379,7 @@ if mongo_uri:
                 submitted_word = st.form_submit_button("📝 Subir Word")
                 
                 if submitted_word:
-                    if titulo_word and archivo_word and autor_word:
+                    if titulo_word and archivo_word and autor_word and identificacion_word and ci_word:
                         contenido_word = procesar_word(archivo_word)
                         
                         if contenido_word:
@@ -370,6 +388,8 @@ if mongo_uri:
                                 "descripcion": descripcion_word,
                                 "categoria": categoria_word,
                                 "autor": autor_word,
+                                "identificacion": identificacion_word,
+                                "ci": ci_word,
                                 "version": version_word,
                                 "tags": [tag.strip() for tag in tags_word.split(",")] if tags_word else [],
                                 "prioridad": prioridad_word,
@@ -395,7 +415,7 @@ if mongo_uri:
             st.header("📂 Todos los Documentos")
             
             # Filtros rápidos
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3, col4, col5 = st.columns(5)
             with col1:
                 filtro_tipo = st.selectbox(
                     "Tipo de documento",
@@ -416,6 +436,8 @@ if mongo_uri:
                 )
             with col4:
                 busqueda_rapida = st.text_input("🔍 Buscar por título", key="busqueda_rapida")
+            with col5:
+                busqueda_identificacion = st.text_input("🔍 Buscar por ID/CI", key="busqueda_identificacion")
             
             # Construir query
             query = {}
@@ -427,6 +449,11 @@ if mongo_uri:
                 query["prioridad"] = filtro_prioridad
             if busqueda_rapida:
                 query["titulo"] = {"$regex": busqueda_rapida, "$options": "i"}
+            if busqueda_identificacion:
+                query["$or"] = [
+                    {"identificacion": {"$regex": busqueda_identificacion, "$options": "i"}},
+                    {"ci": {"$regex": busqueda_identificacion, "$options": "i"}}
+                ]
             
             try:
                 documentos = list(db.documentos.find(query).sort("fecha_creacion", -1))
@@ -450,6 +477,8 @@ if mongo_uri:
                                 st.write(f"**Versión:** {doc['version']}")
                                 st.write(f"**Tags:** {', '.join(doc['tags']) if doc['tags'] else 'Ninguno'}")
                                 st.write(f"**Prioridad:** {doc['prioridad']}")
+                                st.write(f"**Identificación:** {doc.get('identificacion', 'No especificada')}")
+                                st.write(f"**CI/Cédula:** {doc.get('ci', 'No especificada')}")
                                 
                                 if doc.get('tipo') == 'texto':
                                     st.write("---")
@@ -482,4 +511,4 @@ else:
 
 # Footer
 st.markdown("---")
-st.caption("Sistema de Documentación - Búsqueda avanzada por nombre, autor y contenido")
+st.caption("Sistema de Documentación - Búsqueda avanzada por nombre, identificación, CI, autor y contenido")
