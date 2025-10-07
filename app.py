@@ -27,7 +27,7 @@ with st.sidebar:
     mongo_uri = st.text_input(
         "Cadena de Conexión MongoDB",
         type="password",
-        placeholder="mongodb+srv://usuario:contraseña@cluster...",
+        placeholder="mongodb+srv://usuario_documentos:Gloria1312@cluster...",
         help="Pega tu MONGO_URI de MongoDB Atlas"
     )
     
@@ -379,3 +379,4 @@ else:
 # Footer
 st.markdown("---")
 st.caption("Sistema de Documentación - Soporte para Texto, PDF y Word")
+
