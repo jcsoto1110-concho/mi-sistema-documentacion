@@ -16,8 +16,8 @@ st.set_page_config(
 )
 
 # Título principal
-st.title("📄 Sistema de Documentación con Archivos")
-st.markdown("Sube documentos en texto, PDF o Word")
+st.title("📄 Sistema de Documentación con Búsqueda Avanzada")
+st.markdown("Busca documentos por nombre, autor o contenido")
 st.markdown("---")
 
 # Sidebar para configuración
@@ -50,17 +50,15 @@ def connect_mongodb(uri):
 # Procesar archivos PDF
 def procesar_pdf(archivo):
     try:
-        # Leer el contenido binario del PDF
         contenido_binario = archivo.read()
         return Binary(contenido_binario)
     except Exception as e:
         st.error(f"Error procesando PDF: {e}")
         return None
 
-# Procesar archivos Word (.docx)
+# Procesar archivos Word
 def procesar_word(archivo):
     try:
-        # Leer el contenido binario del Word
         contenido_binario = archivo.read()
         return Binary(contenido_binario)
     except Exception as e:
@@ -70,7 +68,6 @@ def procesar_word(archivo):
 # Función para descargar archivos
 def crear_boton_descarga(contenido_binario, nombre_archivo, tipo_archivo):
     try:
-        # Codificar en base64 para el descargable
         b64 = base64.b64encode(contenido_binario).decode()
         
         if tipo_archivo == "pdf":
@@ -89,6 +86,28 @@ def crear_boton_descarga(contenido_binario, nombre_archivo, tipo_archivo):
     except Exception as e:
         st.error(f"Error creando botón de descarga: {e}")
 
+# Función de búsqueda avanzada
+def buscar_documentos(db, criterio_busqueda, tipo_busqueda):
+    try:
+        query = {}
+        
+        if tipo_busqueda == "nombre":
+            query["titulo"] = {"$regex": criterio_busqueda, "$options": "i"}
+        elif tipo_busqueda == "autor":
+            query["autor"] = {"$regex": criterio_busqueda, "$options": "i"}
+        elif tipo_busqueda == "contenido":
+            query["contenido"] = {"$regex": criterio_busqueda, "$options": "i"}
+        elif tipo_busqueda == "tags":
+            query["tags"] = {"$in": [criterio_busqueda]}
+        elif tipo_busqueda == "categoria":
+            query["categoria"] = {"$regex": criterio_busqueda, "$options": "i"}
+        
+        documentos = list(db.documentos.find(query).sort("fecha_creacion", -1))
+        return documentos, None
+        
+    except Exception as e:
+        return None, str(e)
+
 # Solo intentar conexión si hay URI
 if mongo_uri:
     db, connected = connect_mongodb(mongo_uri)
@@ -96,8 +115,94 @@ if mongo_uri:
     if connected:
         st.success("🚀 Conectado a MongoDB Cloud!")
         
-        # Pestañas para diferentes tipos de contenido
-        tab1, tab2, tab3 = st.tabs(["📝 Texto Simple", "📄 Subir PDF", "📝 Subir Word"])
+        # --- SECCIÓN DE BÚSQUEDA AVANZADA ---
+        st.header("🔍 Búsqueda Avanzada de Documentos")
+        
+        col1, col2, col3 = st.columns([2, 2, 1])
+        
+        with col1:
+            criterio_busqueda = st.text_input(
+                "Buscar documentos",
+                placeholder="Ej: guía instalación, juan, API...",
+                key="busqueda_principal"
+            )
+        
+        with col2:
+            tipo_busqueda = st.selectbox(
+                "Buscar por:",
+                ["nombre", "autor", "contenido", "tags", "categoria"],
+                format_func=lambda x: {
+                    "nombre": "📄 Nombre del documento",
+                    "autor": "👤 Autor", 
+                    "contenido": "📝 Contenido",
+                    "tags": "🏷️ Tags",
+                    "categoria": "📂 Categoría"
+                }[x]
+            )
+        
+        with col3:
+            st.write("")  # Espacio vertical
+            buscar_btn = st.button("🔎 Buscar", use_container_width=True)
+        
+        # Realizar búsqueda si se presiona el botón
+        if buscar_btn and criterio_busqueda:
+            with st.spinner("Buscando documentos..."):
+                documentos_encontrados, error = buscar_documentos(db, criterio_busqueda, tipo_busqueda)
+                
+                if error:
+                    st.error(f"❌ Error en búsqueda: {error}")
+                elif documentos_encontrados:
+                    st.success(f"✅ Encontrados {len(documentos_encontrados)} documento(s)")
+                    
+                    # Mostrar resultados de búsqueda
+                    for doc in documentos_encontrados:
+                        icono = "📄" if doc.get('tipo') == 'pdf' else "📝" if doc.get('tipo') == 'word' else "📃"
+                        
+                        with st.expander(
+                            f"{icono} **{doc['titulo']}** - "
+                            f"_{doc.get('tipo', 'texto').upper()}_ - "
+                            f"Por: {doc['autor']} - "
+                            f"📅 {doc['fecha_creacion'].strftime('%d/%m/%Y')}"
+                        ):
+                            col1, col2 = st.columns([3, 1])
+                            
+                            with col1:
+                                st.write(f"**Categoría:** {doc['categoria']}")
+                                st.write(f"**Versión:** {doc['version']}")
+                                st.write(f"**Tags:** {', '.join(doc['tags']) if doc['tags'] else 'Ninguno'}")
+                                st.write(f"**Prioridad:** {doc['prioridad']}")
+                                
+                                if doc.get('tipo') == 'texto':
+                                    st.write("---")
+                                    st.write(f"**Contenido:**")
+                                    st.write(doc['contenido'])
+                                elif doc.get('tipo') in ['pdf', 'word']:
+                                    st.write(f"**Descripción:** {doc.get('descripcion', 'Sin descripción')}")
+                                    st.write(f"**Archivo:** {doc.get('nombre_archivo', 'N/A')}")
+                                    
+                                    # Botón para descargar archivo
+                                    if doc.get('contenido_binario'):
+                                        crear_boton_descarga(
+                                            doc['contenido_binario'],
+                                            doc['nombre_archivo'],
+                                            doc['tipo']
+                                        )
+                            
+                            with col2:
+                                if st.button("🗑️ Eliminar", key=f"delete_search_{doc['_id']}"):
+                                    db.documentos.delete_one({"_id": doc["_id"]})
+                                    st.success("Documento eliminado")
+                                    st.rerun()
+                else:
+                    st.info("🔍 No se encontraron documentos con esos criterios")
+        
+        elif buscar_btn and not criterio_busqueda:
+            st.warning("⚠️ Ingresa un criterio de búsqueda")
+        
+        st.markdown("---")
+        
+        # --- PESTAÑAS PARA AGREGAR DOCUMENTOS ---
+        tab1, tab2, tab3, tab4 = st.tabs(["📝 Texto Simple", "📄 Subir PDF", "📝 Subir Word", "📂 Todos los Documentos"])
         
         # --- PESTAÑA 1: TEXTO SIMPLE ---
         with tab1:
@@ -192,7 +297,6 @@ if mongo_uri:
                 
                 if submitted_pdf:
                     if titulo_pdf and archivo_pdf and autor_pdf:
-                        # Procesar el PDF
                         contenido_pdf = procesar_pdf(archivo_pdf)
                         
                         if contenido_pdf:
@@ -258,7 +362,6 @@ if mongo_uri:
                 
                 if submitted_word:
                     if titulo_word and archivo_word and autor_word:
-                        # Procesar el Word
                         contenido_word = procesar_word(archivo_word)
                         
                         if contenido_word:
@@ -286,97 +389,97 @@ if mongo_uri:
                                 st.error(f"❌ Error al subir Word: {str(e)}")
                     else:
                         st.warning("⚠️ Completa los campos obligatorios (*) y selecciona un archivo Word")
-
-        # --- SECCIÓN PARA VER TODOS LOS DOCUMENTOS ---
-        st.header("📂 Todos los Documentos")
         
-        # Filtros
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            filtro_tipo = st.selectbox(
-                "Tipo de documento",
-                ["Todos", "Texto", "PDF", "Word"]
-            )
-        with col2:
-            filtro_categoria = st.selectbox(
-                "Categoría",
-                ["Todas"] + ["Técnica", "Usuario", "API", "Tutorial", "Referencia", "Otros"]
-            )
-        with col3:
-            filtro_prioridad = st.selectbox(
-                "Prioridad", 
-                ["Todas", "Alta", "Media", "Baja"]
-            )
-        with col4:
-            busqueda = st.text_input("🔍 Buscar por título")
-
-        # Construir query de filtro
-        query = {}
-        if filtro_tipo != "Todos":
-            query["tipo"] = filtro_tipo.lower()
-        if filtro_categoria != "Todas":
-            query["categoria"] = filtro_categoria
-        if filtro_prioridad != "Todas":
-            query["prioridad"] = filtro_prioridad
-        if busqueda:
-            query["titulo"] = {"$regex": busqueda, "$options": "i"}
-
-        try:
-            documentos = list(db.documentos.find(query).sort("fecha_creacion", -1))
+        # --- PESTAÑA 4: TODOS LOS DOCUMENTOS ---
+        with tab4:
+            st.header("📂 Todos los Documentos")
             
-            if documentos:
-                st.info(f"📊 Mostrando {len(documentos)} documento(s)")
+            # Filtros rápidos
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                filtro_tipo = st.selectbox(
+                    "Tipo de documento",
+                    ["Todos", "Texto", "PDF", "Word"],
+                    key="filtro_tipo"
+                )
+            with col2:
+                filtro_categoria = st.selectbox(
+                    "Categoría",
+                    ["Todas"] + ["Técnica", "Usuario", "API", "Tutorial", "Referencia", "Otros"],
+                    key="filtro_categoria"
+                )
+            with col3:
+                filtro_prioridad = st.selectbox(
+                    "Prioridad", 
+                    ["Todas", "Alta", "Media", "Baja"],
+                    key="filtro_prioridad"
+                )
+            with col4:
+                busqueda_rapida = st.text_input("🔍 Buscar por título", key="busqueda_rapida")
+            
+            # Construir query
+            query = {}
+            if filtro_tipo != "Todos":
+                query["tipo"] = filtro_tipo.lower()
+            if filtro_categoria != "Todas":
+                query["categoria"] = filtro_categoria
+            if filtro_prioridad != "Todas":
+                query["prioridad"] = filtro_prioridad
+            if busqueda_rapida:
+                query["titulo"] = {"$regex": busqueda_rapida, "$options": "i"}
+            
+            try:
+                documentos = list(db.documentos.find(query).sort("fecha_creacion", -1))
                 
-                for doc in documentos:
-                    # Icono según el tipo
-                    icono = "📄" if doc.get('tipo') == 'pdf' else "📝" if doc.get('tipo') == 'word' else "📃"
+                if documentos:
+                    st.info(f"📊 Mostrando {len(documentos)} documento(s)")
                     
-                    with st.expander(
-                        f"{icono} **{doc['titulo']}** - "
-                        f"_{doc.get('tipo', 'texto').upper()}_ - "
-                        f"_{doc['categoria']}_ - "
-                        f"Prioridad: {doc['prioridad']} - "
-                        f"📅 {doc['fecha_creacion'].strftime('%d/%m/%Y')}"
-                    ):
-                        col1, col2 = st.columns([3, 1])
+                    for doc in documentos:
+                        icono = "📄" if doc.get('tipo') == 'pdf' else "📝" if doc.get('tipo') == 'word' else "📃"
                         
-                        with col1:
-                            st.write(f"**Autor:** {doc['autor']}")
-                            st.write(f"**Versión:** {doc['version']}")
-                            st.write(f"**Tags:** {', '.join(doc['tags']) if doc['tags'] else 'Ninguno'}")
+                        with st.expander(
+                            f"{icono} **{doc['titulo']}** - "
+                            f"_{doc.get('tipo', 'texto').upper()}_ - "
+                            f"Por: {doc['autor']} - "
+                            f"📅 {doc['fecha_creacion'].strftime('%d/%m/%Y')}"
+                        ):
+                            col1, col2 = st.columns([3, 1])
                             
-                            if doc.get('tipo') == 'texto':
-                                st.write("---")
-                                st.write(f"**Contenido:**")
-                                st.write(doc['contenido'])
-                            elif doc.get('tipo') in ['pdf', 'word']:
-                                st.write(f"**Descripción:** {doc.get('descripcion', 'Sin descripción')}")
-                                st.write(f"**Archivo:** {doc.get('nombre_archivo', 'N/A')}")
-                                st.write(f"**Tamaño:** {doc.get('tamaño_bytes', 0)} bytes")
+                            with col1:
+                                st.write(f"**Categoría:** {doc['categoria']}")
+                                st.write(f"**Versión:** {doc['version']}")
+                                st.write(f"**Tags:** {', '.join(doc['tags']) if doc['tags'] else 'Ninguno'}")
+                                st.write(f"**Prioridad:** {doc['prioridad']}")
                                 
-                                # Botón para descargar archivo
-                                if doc.get('contenido_binario'):
-                                    crear_boton_descarga(
-                                        doc['contenido_binario'],
-                                        doc['nombre_archivo'],
-                                        doc['tipo']
-                                    )
-                        
-                        with col2:
-                            if st.button("🗑️ Eliminar", key=f"delete_{doc['_id']}"):
-                                db.documentos.delete_one({"_id": doc["_id"]})
-                                st.success("Documento eliminado")
-                                st.rerun()
-            else:
-                st.info("📝 No se encontraron documentos. ¡Agrega el primero arriba!")
-                
-        except Exception as e:
-            st.error(f"❌ Error al cargar documentos: {str(e)}")
+                                if doc.get('tipo') == 'texto':
+                                    st.write("---")
+                                    st.write(f"**Contenido:**")
+                                    st.write(doc['contenido'])
+                                elif doc.get('tipo') in ['pdf', 'word']:
+                                    st.write(f"**Descripción:** {doc.get('descripcion', 'Sin descripción')}")
+                                    st.write(f"**Archivo:** {doc.get('nombre_archivo', 'N/A')}")
+                                    
+                                    if doc.get('contenido_binario'):
+                                        crear_boton_descarga(
+                                            doc['contenido_binario'],
+                                            doc['nombre_archivo'],
+                                            doc['tipo']
+                                        )
+                            
+                            with col2:
+                                if st.button("🗑️ Eliminar", key=f"delete_all_{doc['_id']}"):
+                                    db.documentos.delete_one({"_id": doc["_id"]})
+                                    st.success("Documento eliminado")
+                                    st.rerun()
+                else:
+                    st.info("📝 No se encontraron documentos. ¡Agrega el primero en las pestañas de arriba!")
+                    
+            except Exception as e:
+                st.error(f"❌ Error al cargar documentos: {str(e)}")
 
 else:
     st.info("👈 Ingresa tu cadena de conexión MongoDB en la barra lateral para comenzar")
 
 # Footer
 st.markdown("---")
-st.caption("Sistema de Documentación - Soporte para Texto, PDF y Word")
-
+st.caption("Sistema de Documentación - Búsqueda avanzada por nombre, autor y contenido")
