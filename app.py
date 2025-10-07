@@ -66,12 +66,12 @@ if not MONGO_URI:
             placeholder="mongodb+srv://usuario_documentos:Gloria1312@cluster...",
             help="Pega tu MONGO_URI de MongoDB Atlas"
         )
-   else      
+    
         if MONGO_URI:
             st.success("✅ URI configurada - Guarda esta en .env para no volver a ingresarla")
 else:
     st.sidebar.success("✅ MongoDB configurado desde variables de entorno")
-
+else:
 
 # Conexión automática si existe MONGO_URI
 if MONGO_URI:
@@ -535,4 +535,5 @@ st.caption("Sistema de Documentación - Búsqueda avanzada por nombre, CI/cédul
         st.error("No se pudo conectar a MongoDB")
 else:
     st.info("👈 Configura la conexión MongoDB para comenzar")
+
 
