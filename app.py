@@ -54,6 +54,8 @@ def connect_mongodb(uri):
     except Exception as e:
         st.error(f"❌ Error de conexión: {str(e)}")
         return None, False
+
+
 # Solo mostrar configuración si no hay MONGO_URI
 if not MONGO_URI:
     with st.sidebar:
@@ -61,10 +63,10 @@ if not MONGO_URI:
         MONGO_URI = st.text_input(
             "Cadena de Conexión MongoDB",
             type="password",
-            placeholder="mongodb+srv://usuario:contraseña@cluster...",
+            placeholder="mongodb+srv://usuario_documentos:Gloria1312@cluster...",
             help="Pega tu MONGO_URI de MongoDB Atlas"
         )
-        
+   else      
         if MONGO_URI:
             st.success("✅ URI configurada - Guarda esta en .env para no volver a ingresarla")
 else:
@@ -533,3 +535,4 @@ st.caption("Sistema de Documentación - Búsqueda avanzada por nombre, CI/cédul
         st.error("No se pudo conectar a MongoDB")
 else:
     st.info("👈 Configura la conexión MongoDB para comenzar")
+
