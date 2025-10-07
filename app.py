@@ -6,7 +6,11 @@ import io
 import base64
 from bson import Binary
 from bson.binary import Binary
+from dotenv import load_dotenv
 import tempfile
+
+# Cargar variables de entorno
+load_dotenv()
 
 # Configuración de la página
 st.set_page_config(
@@ -14,6 +18,10 @@ st.set_page_config(
     page_icon="📄",
     layout="wide"
 )
+
+
+# Obtener MONGO_URI de variables de entorno
+MONGO_URI = os.getenv('MONGO_URI')
 
 # Título principal
 st.title("📄 Sistema de Documentación con Búsqueda Avanzada")
@@ -46,6 +54,29 @@ def connect_mongodb(uri):
     except Exception as e:
         st.error(f"❌ Error de conexión: {str(e)}")
         return None, False
+# Solo mostrar configuración si no hay MONGO_URI
+if not MONGO_URI:
+    with st.sidebar:
+        st.header("🔧 Configuración MongoDB")
+        MONGO_URI = st.text_input(
+            "Cadena de Conexión MongoDB",
+            type="password",
+            placeholder="mongodb+srv://usuario:contraseña@cluster...",
+            help="Pega tu MONGO_URI de MongoDB Atlas"
+        )
+        
+        if MONGO_URI:
+            st.success("✅ URI configurada - Guarda esta en .env para no volver a ingresarla")
+else:
+    st.sidebar.success("✅ MongoDB configurado desde variables de entorno")
+
+
+# Conexión automática si existe MONGO_URI
+if MONGO_URI:
+    db, connected = connect_mongodb(MONGO_URI)
+    
+    if connected:
+        st.success("🚀 Conectado a MongoDB Cloud!")
 
 # Procesar archivos PDF
 def procesar_pdf(archivo):
@@ -497,3 +528,8 @@ else:
 # Footer
 st.markdown("---")
 st.caption("Sistema de Documentación - Búsqueda avanzada por nombre, CI/cédula, autor y contenido")
+
+  else:
+        st.error("No se pudo conectar a MongoDB")
+else:
+    st.info("👈 Configura la conexión MongoDB para comenzar")
