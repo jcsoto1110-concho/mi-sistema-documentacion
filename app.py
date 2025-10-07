@@ -141,8 +141,7 @@ if mongo_uri:
                     "contenido": "📝 Contenido",
                     "tags": "🏷️ Tags",
                     "categoria": "📂 Categoría",
-                    "identificacion": "🆔 Identificación",
-                    "ci": "🔢 CI/Cédula"
+                      "ci": "🔢 CI/Cédula"
                 }[x]
             )
         
@@ -177,7 +176,6 @@ if mongo_uri:
                                 st.write(f"**Versión:** {doc['version']}")
                                 st.write(f"**Tags:** {', '.join(doc['tags']) if doc['tags'] else 'Ninguno'}")
                                 st.write(f"**Prioridad:** {doc['prioridad']}")
-                                st.write(f"**Identificación:** {doc.get('identificacion', 'No especificada')}")
                                 st.write(f"**CI/Cédula:** {doc.get('ci', 'No especificada')}")
                                 
                                 if doc.get('tipo') == 'texto':
@@ -227,7 +225,7 @@ if mongo_uri:
                         key="texto_categoria"
                     )
                     autor = st.text_input("Autor*", placeholder="Tu nombre", key="texto_autor")
-                    identificacion = st.text_input("Identificación*", placeholder="Ej: EMP-001, CLT-2024", key="texto_identificacion")
+                   
                     
                 with col2:
                     ci = st.text_input("CI/Cédula*", placeholder="Número de cédula", key="texto_ci")
@@ -287,7 +285,7 @@ if mongo_uri:
                         key="pdf_categoria"
                     )
                     autor_pdf = st.text_input("Autor*", placeholder="Tu nombre", key="pdf_autor")
-                    identificacion_pdf = st.text_input("Identificación*", placeholder="Ej: EMP-001, CLT-2024", key="pdf_identificacion")
+                  
                     
                 with col2:
                     ci_pdf = st.text_input("CI/Cédula*", placeholder="Número de cédula", key="pdf_ci")
@@ -356,7 +354,7 @@ if mongo_uri:
                         key="word_categoria"
                     )
                     autor_word = st.text_input("Autor*", placeholder="Tu nombre", key="word_autor")
-                    identificacion_word = st.text_input("Identificación*", placeholder="Ej: EMP-001, CLT-2024", key="word_identificacion")
+                  
                     
                 with col2:
                     ci_word = st.text_input("CI/Cédula*", placeholder="Número de cédula", key="word_ci")
@@ -477,8 +475,7 @@ if mongo_uri:
                                 st.write(f"**Versión:** {doc['version']}")
                                 st.write(f"**Tags:** {', '.join(doc['tags']) if doc['tags'] else 'Ninguno'}")
                                 st.write(f"**Prioridad:** {doc['prioridad']}")
-                                st.write(f"**Identificación:** {doc.get('identificacion', 'No especificada')}")
-                                st.write(f"**CI/Cédula:** {doc.get('ci', 'No especificada')}")
+                                 st.write(f"**CI/Cédula:** {doc.get('ci', 'No especificada')}")
                                 
                                 if doc.get('tipo') == 'texto':
                                     st.write("---")
@@ -511,4 +508,5 @@ else:
 
 # Footer
 st.markdown("---")
-st.caption("Sistema de Documentación - Búsqueda avanzada por nombre, identificación, CI, autor y contenido")
+st.caption("Sistema de Documentación - Búsqueda avanzada por nombre,  CI, autor y contenido")
+
