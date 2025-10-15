@@ -525,6 +525,532 @@ if mongo_uri:
         # Pestaña 4: Todos los Documentos
         with tab4:
             st.markdown("### Biblioteca de Documentos")
+
+
+
+        # --- NUEVA PESTAÑA PARA CARGA MASIVA DE ARCHIVOS POR CI ---
+        tab5 = st.tabs(["🚀 Carga Masiva por CI"])[0]
+
+        with tab5:
+            st.markdown("### 🚀 Carga Masiva de Archivos por CI")
+            st.info("""
+            **Carga masiva de documentos organizados por carpetas de CI**
+            - Estructura: `C:/ruta/carpetas/CI/archivos.pdf`
+            - Soporta: PDF, Word, imágenes, texto
+            - Metadatos automáticos desde Excel
+            - Hasta 10,000 documentos por carga
+            """)
+            
+            # Configuración en dos columnas
+            col_config1, col_config2 = st.columns(2)
+            
+            with col_config1:
+                st.markdown("#### 📁 Configuración de Carpetas")
+                ruta_base = st.text_input(
+                    "**Ruta base de carpetas CI** *",
+                    value="C:\\documentos\\",
+                    placeholder="C:\\ruta\\carpetas_ci\\",
+                    help="Ruta donde están las carpetas organizadas por número de CI"
+                )
+                
+                tipos_archivo = st.multiselect(
+                    "**Tipos de archivo a procesar** *",
+                    ['.pdf', '.docx', '.doc', '.jpg', '.jpeg', '.png', '.txt'],
+                    default=['.pdf', '.docx', '.doc'],
+                    help="Selecciona los tipos de archivo a incluir"
+                )
+                
+                procesar_subcarpetas = st.checkbox(
+                    "**Procesar subcarpetas dentro de cada CI**",
+                    value=True,
+                    help="Buscar documentos en subcarpetas dentro de cada carpeta de CI"
+                )
+            
+            with col_config2:
+                st.markdown("#### 📊 Configuración de Procesamiento")
+                max_documentos = st.number_input(
+                    "**Límite de documentos**",
+                    min_value=100,
+                    max_value=10000,
+                    value=3000,
+                    step=100,
+                    help="Máximo número de documentos a procesar"
+                )
+                
+                tamaño_lote = st.slider(
+                    "**Tamaño del lote**",
+                    min_value=50,
+                    max_value=500,
+                    value=100,
+                    help="Documentos procesados por lote (mejora performance)"
+                )
+                
+                sobrescribir_existentes = st.checkbox(
+                    "**Sobrescribir documentos existentes**",
+                    value=False,
+                    help="Reemplazar documentos que ya existen en la base de datos"
+                )
+            
+            # Sección para Excel de metadatos
+            st.markdown("#### 📋 Archivo Excel con Metadatos")
+            st.info("""
+            **El Excel debe contener las columnas:**
+            - `ci` (obligatorio): Número de cédula
+            - `nombre` (obligatorio): Nombre completo
+            - `titulo`: Título del documento (si no se especifica, se genera automáticamente)
+            - `categoria`: Categoría del documento
+            - `autor`: Autor del documento  
+            - `version`: Versión del documento
+            - `etiquetas`: Tags separados por comas
+            - `prioridad`: Baja, Media, Alta
+            """)
+            
+            archivo_excel = st.file_uploader(
+                "**Subir Excel con metadatos** *",
+                type=['xlsx', 'xls'],
+                help="Excel con información de CI, nombres, títulos, etc."
+            )
+            
+            # Previsualización del Excel
+            if archivo_excel:
+                try:
+                    df_metadatos = pd.read_excel(archivo_excel)
+                    st.success(f"✅ Excel cargado: {len(df_metadatos)} registros de CI encontrados")
+                    
+                    with st.expander("📊 Vista previa del Excel", expanded=True):
+                        st.dataframe(df_metadatos.head(10), use_container_width=True)
+                        
+                        # Estadísticas del Excel
+                        col_stats1, col_stats2, col_stats3 = st.columns(3)
+                        with col_stats1:
+                            st.metric("Total CIs", len(df_metadatos))
+                        with col_stats2:
+                            st.metric("Columnas", len(df_metadatos.columns))
+                        with col_stats3:
+                            cis_unicos = df_metadatos['ci'].nunique() if 'ci' in df_metadatos.columns else 0
+                            st.metric("CIs Únicos", cis_unicos)
+                
+                except Exception as e:
+                    st.error(f"❌ Error al leer el Excel: {str(e)}")
+            
+            # Botón de procesamiento
+            st.markdown("#### ⚡ Procesamiento Masivo")
+            
+            if st.button("🚀 Iniciar Carga Masiva", type="primary", use_container_width=True):
+                if not archivo_excel:
+                    st.error("❌ Debes subir un archivo Excel con los metadatos")
+                elif not ruta_base:
+                    st.error("❌ Debes especificar la ruta base de las carpetas CI")
+                elif not tipos_archivo:
+                    st.error("❌ Debes seleccionar al menos un tipo de archivo")
+                else:
+                    # Validar estructura del Excel
+                    try:
+                        df_metadatos = pd.read_excel(archivo_excel)
+                        errores = validar_excel_metadatos(df_metadatos)
+                        
+                        if errores:
+                            st.error("❌ Errores en el Excel:")
+                            for error in errores:
+                                st.write(f"• {error}")
+                        else:
+                            # Procesar carga masiva
+                            with st.spinner("🔄 Iniciando procesamiento masivo..."):
+                                resultado = procesar_carga_masiva_ci(
+                                    db=db,
+                                    ruta_base=ruta_base,
+                                    df_metadatos=df_metadatos,
+                                    tipos_archivo=tipos_archivo,
+                                    max_documentos=max_documentos,
+                                    tamaño_lote=tamaño_lote,
+                                    procesar_subcarpetas=procesar_subcarpetas,
+                                    sobrescribir_existentes=sobrescribir_existentes
+                                )
+                    
+                    except Exception as e:
+                        st.error(f"❌ Error en validación: {str(e)}")
+
+# --- AGREGAR ESTAS FUNCIONES NUEVAS AL FINAL DEL CÓDIGO ---
+
+import os
+import glob
+from pathlib import Path
+import shutil
+from concurrent.futures import ThreadPoolExecutor
+import threading
+
+def validar_excel_metadatos(df):
+    """Valida la estructura del Excel de metadatos"""
+    errores = []
+    
+    # Campos obligatorios
+    if 'ci' not in df.columns:
+        errores.append("Falta columna obligatoria: 'ci'")
+    if 'nombre' not in df.columns:
+        errores.append("Falta columna obligatoria: 'nombre'")
+    
+    if errores:
+        return errores
+    
+    # Validar que CI sean únicos y válidos
+    if df['ci'].isnull().any():
+        errores.append("Hay valores nulos en la columna 'ci'")
+    
+    # Validar formatos
+    if 'prioridad' in df.columns:
+        prioridades_validas = ['Baja', 'Media', 'Alta']
+        prioridades_invalidas = df[~df['prioridad'].isin(prioridades_validas)]['prioridad'].unique()
+        if len(prioridades_invalidas) > 0:
+            errores.append(f"Prioridades inválidas: {', '.join(prioridades_invalidas)}")
+    
+    return errores
+
+def buscar_archivos_por_ci(ruta_base, ci, tipos_archivo, procesar_subcarpetas):
+    """Busca archivos para un CI específico"""
+    try:
+        ci_str = str(ci).strip()
+        carpeta_ci = Path(ruta_base) / ci_str
+        
+        if not carpeta_ci.exists():
+            return []
+        
+        archivos = []
+        
+        # Buscar en carpeta principal
+        for extension in tipos_archivo:
+            patron = f"*{extension}"
+            if procesar_subcarpetas:
+                archivos.extend(carpeta_ci.rglob(patron))
+            else:
+                archivos.extend(carpeta_ci.glob(patron))
+        
+        return archivos
+    
+    except Exception as e:
+        return []
+
+def procesar_archivo_masivo(archivo_path, ci, metadatos_ci, config):
+    """Procesa un archivo individual para la carga masiva"""
+    try:
+        # Leer contenido binario
+        with open(archivo_path, 'rb') as f:
+            contenido_binario = Binary(f.read())
+        
+        # Determinar tipo de archivo
+        extension = archivo_path.suffix.lower()
+        if extension == '.pdf':
+            tipo_archivo = 'pdf'
+        elif extension in ['.docx', '.doc']:
+            tipo_archivo = 'word'
+        elif extension in ['.jpg', '.jpeg', '.png']:
+            tipo_archivo = 'imagen'
+        elif extension == '.txt':
+            tipo_archivo = 'texto'
+        else:
+            tipo_archivo = 'documento'
+        
+        # Generar título automático si no está en metadatos
+        titulo = metadatos_ci.get('titulo')
+        if not titulo:
+            nombre_archivo = archivo_path.stem
+            titulo = f"{nombre_archivo} - {metadatos_ci['nombre']}"
+        
+        # Procesar etiquetas
+        etiquetas = []
+        if 'etiquetas' in metadatos_ci and pd.notna(metadatos_ci['etiquetas']):
+            etiquetas = [tag.strip() for tag in str(metadatos_ci['etiquetas']).split(',')]
+        
+        # Agregar etiquetas automáticas
+        etiquetas.extend([str(ci), 'carga_masiva', 'automático', tipo_archivo])
+        
+        # Crear documento
+        documento = {
+            "titulo": titulo,
+            "categoria": metadatos_ci.get('categoria', 'Personal'),
+            "autor": metadatos_ci.get('autor', metadatos_ci['nombre']),
+            "ci": str(ci),
+            "nombre_completo": metadatos_ci['nombre'],
+            "version": metadatos_ci.get('version', '1.0'),
+            "tags": etiquetas,
+            "prioridad": metadatos_ci.get('prioridad', 'Media'),
+            "tipo": tipo_archivo,
+            "nombre_archivo": archivo_path.name,
+            "contenido_binario": contenido_binario,
+            "tamaño_bytes": len(contenido_binario),
+            "ruta_original": str(archivo_path),
+            "fecha_creacion": datetime.utcnow(),
+            "fecha_actualizacion": datetime.utcnow(),
+            "procesado_masivo": True,
+            "lote_carga": config.get('lote_id')
+        }
+        
+        return documento, None
+        
+    except Exception as e:
+        return None, f"Error procesando {archivo_path}: {str(e)}"
+
+def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_documentos, 
+                           tamaño_lote, procesar_subcarpetas, sobrescribir_existentes):
+    """Función principal para procesar carga masiva por CI"""
+    
+    try:
+        # Configuración
+        config = {
+            'lote_id': f"masivo_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        }
+        
+        # Contadores
+        total_archivos = 0
+        archivos_procesados = 0
+        documentos_exitosos = 0
+        documentos_fallidos = 0
+        documentos_duplicados = 0
+        cis_procesados = 0
+        
+        # Lista para almacenar todos los documentos a procesar
+        todos_documentos = []
+        
+        st.info("🔍 Buscando archivos en carpetas CI...")
+        
+        # Buscar archivos para cada CI en el Excel
+        for _, fila in df_metadatos.iterrows():
+            ci = fila['ci']
+            archivos_ci = buscar_archivos_por_ci(ruta_base, ci, tipos_archivo, procesar_subcarpetas)
+            
+            if archivos_ci:
+                cis_procesados += 1
+                for archivo in archivos_ci:
+                    if total_archivos < max_documentos:
+                        todos_documentos.append((archivo, ci, fila.to_dict()))
+                        total_archivos += 1
+                    else:
+                        break
+            
+            if total_archivos >= max_documentos:
+                break
+        
+        if not todos_documentos:
+            st.warning("⚠️ No se encontraron archivos para procesar")
+            return
+        
+        st.success(f"🎯 Encontrados {total_archivos} archivos en {cis_procesados} carpetas CI")
+        
+        # Configurar interfaz de progreso
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        resultados_container = st.container()
+        
+        # Procesar por lotes
+        for i in range(0, len(todos_documentos), tamaño_lote):
+            lote_actual = todos_documentos[i:i + tamaño_lote]
+            documentos_a_insertar = []
+            
+            for archivo_path, ci, metadatos in lote_actual:
+                # Verificar duplicados si no se permite sobrescribir
+                if not sobrescribir_existentes:
+                    existe = db.documentos.count_documents({
+                        "nombre_archivo": archivo_path.name,
+                        "ci": str(ci)
+                    }) > 0
+                    
+                    if existe:
+                        documentos_duplicados += 1
+                        continue
+                
+                # Procesar archivo
+                documento, error = procesar_archivo_masivo(archivo_path, ci, metadatos, config)
+                
+                if error:
+                    documentos_fallidos += 1
+                    st.error(error)
+                else:
+                    documentos_a_insertar.append(documento)
+            
+            # Insertar lote en MongoDB
+            if documentos_a_insertar:
+                try:
+                    result = db.documentos.insert_many(documentos_a_insertar, ordered=False)
+                    documentos_exitosos += len(result.inserted_ids)
+                except Exception as e:
+                    documentos_fallidos += len(documentos_a_insertar)
+                    st.error(f"Error insertando lote: {str(e)}")
+            
+            archivos_procesados += len(lote_actual)
+            
+            # Actualizar progreso
+            progreso = archivos_procesados / len(todos_documentos)
+            progress_bar.progress(progreso)
+            status_text.text(
+                f"📊 Progreso: {archivos_procesados}/{len(todos_documentos)} | "
+                f"✅ Exitosos: {documentos_exitosos} | "
+                f"❌ Fallidos: {documentos_fallidos} | "
+                f"⚡ Duplicados: {documentos_duplicados}"
+            )
+            
+            # Pequeña pausa para no sobrecargar
+            time.sleep(0.1)
+        
+        # Mostrar resultados finales
+        progress_bar.progress(1.0)
+        status_text.text("✅ Procesamiento completado!")
+        
+        with resultados_container:
+            st.markdown("### 📈 Resultados Finales")
+            
+            # Métricas principales
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Archivos Encontrados", len(todos_documentos))
+            with col2:
+                st.metric("Procesados Exitosos", documentos_exitosos,
+                         delta=f"{(documentos_exitosos/len(todos_documentos)*100):.1f}%")
+            with col3:
+                st.metric("Fallidos", documentos_fallidos,
+                         delta=f"-{(documentos_fallidos/len(todos_documentos)*100):.1f}%" if documentos_fallidos > 0 else None,
+                         delta_color="inverse")
+            with col4:
+                st.metric("CIs Procesados", cis_procesados)
+            
+            # Resumen detallado
+            st.markdown("#### 📋 Resumen por Categoría")
+            try:
+                pipeline = [
+                    {"$match": {"procesado_masivo": True, "lote_carga": config['lote_id']}},
+                    {"$group": {"_id": "$categoria", "count": {"$sum": 1}}},
+                    {"$sort": {"count": -1}}
+                ]
+                resumen_categoria = list(db.documentos.aggregate(pipeline))
+                
+                if resumen_categoria:
+                    df_categoria = pd.DataFrame(resumen_categoria)
+                    df_categoria.columns = ['Categoría', 'Documentos']
+                    st.dataframe(df_categoria, use_container_width=True)
+            except Exception as e:
+                st.error(f"Error generando resumen: {e}")
+            
+            # Top CIs con más documentos
+            st.markdown("#### 👥 Top CIs con más documentos")
+            try:
+                pipeline = [
+                    {"$match": {"procesado_masivo": True, "lote_carga": config['lote_id']}},
+                    {"$group": {"_id": {"ci": "$ci", "nombre": "$nombre_completo"}, "count": {"$sum": 1}}},
+                    {"$sort": {"count": -1}},
+                    {"$limit": 10}
+                ]
+                top_cis = list(db.documentos.aggregate(pipeline))
+                
+                if top_cis:
+                    datos_top = []
+                    for item in top_cis:
+                        datos_top.append({
+                            'CI': item['_id']['ci'],
+                            'Nombre': item['_id']['nombre'],
+                            'Documentos': item['count']
+                        })
+                    df_top = pd.DataFrame(datos_top)
+                    st.dataframe(df_top, use_container_width=True)
+            except:
+                pass
+            
+            if documentos_exitosos > 0:
+                st.success(f"🎉 Carga masiva completada! {documentos_exitosos} documentos procesados exitosamente.")
+                st.balloons()
+            
+            if documentos_duplicados > 0:
+                st.info(f"💡 {documentos_duplicados} documentos no se procesaron por duplicados. "
+                       "Marca 'Sobrescribir documentos existentes' para forzar el reprocesamiento.")
+                
+    except Exception as e:
+        st.error(f"❌ Error en el procesamiento masivo: {str(e)}")
+
+# --- FUNCIÓN PARA CREAR PLANTILLA EXCEL ---
+
+def crear_plantilla_carga_masiva():
+    """Crea y descarga plantilla Excel para carga masiva"""
+    
+    datos_ejemplo = {
+        'ci': ['12345678', '87654321', '11223344', '55667788', '99887766'],
+        'nombre': ['Juan Pérez García', 'María López Martínez', 'Carlos Rodríguez Silva', 
+                  'Ana Fernández Cruz', 'Pedro González Reyes'],
+        'titulo': ['Contrato Laboral', 'Identificación Oficial', 'Curriculum Vitae', 
+                  'Certificado Estudios', 'Comprobante Domicilio'],
+        'categoria': ['Legal', 'Identificación', 'Laboral', 'Educación', 'Personal'],
+        'autor': ['Departamento Legal', 'Sistema Automático', 'Recursos Humanos', 
+                 'Institución Educativa', 'Usuario'],
+        'version': ['1.0', '1.0', '2.1', '1.0', '1.0'],
+        'etiquetas': ['contrato,laboral,legal', 'identificacion,oficial', 
+                     'curriculum,laboral', 'educacion,certificado', 'domicilio,personal'],
+        'prioridad': ['Alta', 'Alta', 'Media', 'Media', 'Baja']
+    }
+    
+    df_plantilla = pd.DataFrame(datos_ejemplo)
+    
+    # Crear archivo en memoria
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_plantilla.to_excel(writer, sheet_name='Metadatos_CI', index=False)
+        
+        # Hoja de instrucciones
+        workbook = writer.book
+        worksheet_inst = workbook.add_worksheet('Instrucciones')
+        
+        instrucciones = [
+            "INSTRUCCIONES PARA CARGA MASIVA POR CI",
+            "",
+            "ESTRUCTURA DE CARPETAS:",
+            "C:/ruta/base/",
+            "├── 12345678/",
+            "│   ├── contrato.pdf",
+            "│   ├── identificacion.jpg",
+            "│   └── curriculum.docx",
+            "├── 87654321/",
+            "│   └── documento.pdf",
+            "└── ...",
+            "",
+            "COLUMNAS OBLIGATORIAS:",
+            "- ci: Número de cédula (debe coincidir con nombre de carpeta)",
+            "- nombre: Nombre completo de la persona",
+            "",
+            "COLUMNAS OPCIONALES:",
+            "- titulo: Título del documento (si no se especifica, se genera del nombre archivo)",
+            "- categoria: Legal, Identificación, Laboral, Educación, Personal, etc.",
+            "- autor: Quién creó el documento",
+            "- version: Versión del documento",
+            "- etiquetas: Separar con comas sin espacios",
+            "- prioridad: Alta, Media, Baja",
+            "",
+            "NOTAS:",
+            "- Máximo 10,000 documentos por carga",
+            "- Los CIs deben ser numéricos",
+            "- Las carpetas deben llamarse exactamente igual al CI"
+        ]
+        
+        for i, instruccion in enumerate(instrucciones):
+            worksheet_inst.write(i, 0, instruccion)
+    
+    output.seek(0)
+    
+    # Botón de descarga
+    b64 = base64.b64encode(output.read()).decode()
+    href = f'''
+    <a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" 
+       download="plantilla_carga_masiva_ci.xlsx" 
+       style="background-color: #2196F3; color: white; padding: 12px 20px; 
+              text-decoration: none; border-radius: 5px; display: inline-block;
+              font-weight: bold; font-size: 16px;">
+       📥 Descargar Plantilla Excel
+    </a>
+    '''
+    st.markdown(href, unsafe_allow_html=True)
+
+# Y agregar esta llamada en la pestaña tab5, después de la configuración:
+
+            # En la pestaña tab5, después de la sección de configuración
+            st.markdown("---")
+            st.markdown("#### 🧪 Generar Plantilla")
+            crear_plantilla_carga_masiva()
+
+
             
             # Filtros avanzados
             with st.expander("**Filtros Avanzados**", expanded=True):
@@ -587,6 +1113,7 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
