@@ -583,7 +583,8 @@ else:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666;'>
-    <p>Sistema de Gestión Documental | 📧 soporte@empresa.com | 📞 +1 (555) 123-4567</p>
+    <p>Sistema de Gestión Documental | 📧 erp@ec.aseyco.com | 📞 02483914</p>
     <p>© 2024 Tu Empresa. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
