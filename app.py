@@ -533,7 +533,7 @@ if mongo_uri:
         # En la pestaña tab5, después de la sección de configuración
         #    st.markdown("---")
          #   st.markdown("#### 🧪 Generar Plantilla")
-            crear_plantilla_carga_masiva()
+    #        crear_plantilla_carga_masiva()
         
         with tab5:
             st.markdown("### 🚀 Carga Masiva de Archivos por CI")
@@ -1111,6 +1111,7 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
