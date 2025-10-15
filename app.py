@@ -530,7 +530,11 @@ if mongo_uri:
 
         # --- NUEVA PESTAÑA PARA CARGA MASIVA DE ARCHIVOS POR CI ---
         tab5 = st.tabs(["🚀 Carga Masiva por CI"])[0]
-
+# En la pestaña tab5, después de la sección de configuración
+            st.markdown("---")
+            st.markdown("#### 🧪 Generar Plantilla")
+            crear_plantilla_carga_masiva()
+        
         with tab5:
             st.markdown("### 🚀 Carga Masiva de Archivos por CI")
             st.info("""
@@ -1043,12 +1047,6 @@ def crear_plantilla_carga_masiva():
     '''
     st.markdown(href, unsafe_allow_html=True)
 
-# Y agregar esta llamada en la pestaña tab5, después de la configuración:
-
-            # En la pestaña tab5, después de la sección de configuración
-            st.markdown("---")
-            st.markdown("#### 🧪 Generar Plantilla")
-            crear_plantilla_carga_masiva()
 
 
             
@@ -1113,6 +1111,7 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
