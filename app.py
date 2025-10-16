@@ -265,18 +265,8 @@ def mostrar_documento(doc, key_suffix=""):
             
             # Usar un formulario para el botón de eliminar para manejar mejor el estado
             with st.form(key=f"delete_form_{doc['_id']}_{key_suffix}"):
-                
-                if st.button("🗑️ Eliminar", key=f"delete_{doc['_id']}_{key_suffix}", use_container_width=True):
-        with st.spinner("Eliminando..."):
-            if eliminar_documento(doc["_id"]):
-                # Forzar rerenderización inmediata
-                st.rerun()
-    
-    if st.button("📋 Copiar ID", key=f"copy_{doc['_id']}_{key_suffix}", use_container_width=True):
-        st.code(str(doc['_id']), language='text')
-        st.success("ID copiado al portapapeles")
-
-                        
+              if st.form_submit_button("🗑️ Eliminar", use_container_width=True):
+                    with st.spinner("Eliminando..."):
                         try:
                             result = db.documentos.delete_one({"_id": doc["_id"]})
                             if result.deleted_count > 0:
