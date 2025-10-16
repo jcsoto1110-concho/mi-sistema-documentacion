@@ -736,6 +736,264 @@ def crear_plantilla_carga_masiva():
         - Puedes usar Excel o cualquier editor de texto para crear el CSV
         """)
 
+# --- FUNCIONES PARA CARGA MASIVA CON ARCHIVOS LOCALES ---
+
+def buscar_archivos_por_ci_plano(ruta_base, ci, tipos_archivo, patron_busqueda):
+    """Busca archivos que contengan el CI en el nombre (sin subcarpetas)"""
+    try:
+        carpeta = Path(ruta_base)
+        if not carpeta.exists():
+            return []
+        
+        archivos_encontrados = []
+        ci_str = str(ci).strip()
+        
+        # Buscar todos los archivos con las extensiones especificadas
+        for extension in tipos_archivo:
+            patron = f"*{extension}"
+            archivos = list(carpeta.glob(patron))
+            
+            for archivo in archivos:
+                nombre_archivo = archivo.name.lower()
+                
+                # Diferentes patrones de búsqueda
+                if patron_busqueda == "CI al inicio":
+                    # El archivo debe empezar con el CI
+                    if nombre_archivo.startswith(ci_str.lower()):
+                        archivos_encontrados.append(archivo)
+                
+                elif patron_busqueda == "CI en cualquier parte":
+                    # El CI puede estar en cualquier parte del nombre
+                    if ci_str.lower() in nombre_archivo:
+                        archivos_encontrados.append(archivo)
+                
+                elif patron_busqueda == "CI específico en nombre":
+                    # Busca patrones comunes: CI_ o _CI
+                    patrones = [
+                        f"{ci_str}_",
+                        f"_{ci_str}",
+                        f"{ci_str}-",
+                        f"-{ci_str}",
+                        f" {ci_str} ",
+                        f"({ci_str})"
+                    ]
+                    if any(patron.lower() in nombre_archivo for patron in patrones):
+                        archivos_encontrados.append(archivo)
+        
+        return archivos_encontrados
+        
+    except Exception as e:
+        st.error(f"Error buscando archivos para CI {ci}: {str(e)}")
+        return []
+
+def procesar_archivo_masivo_local(archivo_path, ci, metadatos_ci, config):
+    """Procesa un archivo individual para la carga masiva local (sin contenido binario en BD)"""
+    try:
+        # Obtener información del archivo sin cargarlo en memoria
+        tamaño_bytes = archivo_path.stat().st_size
+        
+        # Determinar tipo de archivo
+        extension = archivo_path.suffix.lower()
+        if extension == '.pdf':
+            tipo_archivo = 'pdf'
+        elif extension in ['.docx', '.doc']:
+            tipo_archivo = 'word'
+        elif extension in ['.jpg', '.jpeg', '.png']:
+            tipo_archivo = 'imagen'
+        elif extension == '.txt':
+            tipo_archivo = 'texto'
+        else:
+            tipo_archivo = 'documento'
+        
+        # Generar título automático si no está en metadatos
+        titulo = metadatos_ci.get('titulo')
+        if not titulo:
+            nombre_archivo = archivo_path.stem
+            titulo = f"{nombre_archivo} - {metadatos_ci['nombre']}"
+        
+        # Procesar etiquetas
+        etiquetas = []
+        if 'etiquetas' in metadatos_ci and pd.notna(metadatos_ci['etiquetas']):
+            etiquetas = [tag.strip() for tag in str(metadatos_ci['etiquetas']).split(',')]
+        
+        # Agregar etiquetas automáticas
+        etiquetas.extend([str(ci), 'carga_masiva', 'automático', tipo_archivo, 'archivo_local'])
+        
+        # Crear documento (sin contenido_binario)
+        documento = {
+            "titulo": titulo,
+            "categoria": metadatos_ci.get('categoria', 'Personal'),
+            "autor": metadatos_ci.get('autor', metadatos_ci['nombre']),
+            "ci": str(ci),
+            "nombre_completo": metadatos_ci['nombre'],
+            "version": metadatos_ci.get('version', '1.0'),
+            "tags": etiquetas,
+            "prioridad": metadatos_ci.get('prioridad', 'Media'),
+            "tipo": tipo_archivo,
+            "nombre_archivo": archivo_path.name,
+            "tamaño_bytes": tamaño_bytes,
+            "ruta_local": str(archivo_path),
+            "fecha_creacion": datetime.utcnow(),
+            "fecha_actualizacion": datetime.utcnow(),
+            "procesado_masivo": True,
+            "almacenamiento": "local",
+            "lote_carga": config.get('lote_id')
+        }
+        
+        return documento, None
+        
+    except Exception as e:
+        return None, f"Error procesando {archivo_path}: {str(e)}"
+
+def procesar_carga_masiva_ci_local(db, ruta_base, df_metadatos, tipos_archivo, max_documentos, 
+                                  tamaño_lote, patron_busqueda, sobrescribir_existentes):
+    """Función para procesar carga masiva manteniendo archivos en sistema local"""
+    
+    try:
+        # Configuración
+        config = {
+            'lote_id': f"masivo_local_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        }
+        
+        # Contadores
+        total_archivos = 0
+        archivos_procesados = 0
+        documentos_exitosos = 0
+        documentos_fallidos = 0
+        documentos_duplicados = 0
+        cis_procesados = 0
+        
+        # Lista para almacenar todos los documentos a procesar
+        todos_documentos = []
+        
+        st.info("🔍 Buscando archivos por CI en nombres de archivo...")
+        
+        # Verificar que la ruta base existe
+        if not os.path.exists(ruta_base):
+            st.error(f"❌ La ruta base no existe: {ruta_base}")
+            return
+        
+        # Buscar archivos para cada CI en el CSV
+        for _, fila in df_metadatos.iterrows():
+            ci = fila['ci']
+            archivos_ci = buscar_archivos_por_ci_plano(ruta_base, ci, tipos_archivo, patron_busqueda)
+            
+            if archivos_ci:
+                cis_procesados += 1
+                for archivo in archivos_ci:
+                    if total_archivos < max_documentos:
+                        todos_documentos.append((archivo, ci, fila.to_dict()))
+                        total_archivos += 1
+                    else:
+                        break
+            
+            if total_archivos >= max_documentos:
+                break
+        
+        if not todos_documentos:
+            st.warning("⚠️ No se encontraron archivos para procesar")
+            st.info("💡 Sugerencias:")
+            st.info("- Verifica que los nombres de archivo contengan el número de CI")
+            st.info("- Revisa el patrón de búsqueda seleccionado")
+            st.info("- Confirma que los tipos de archivo coincidan")
+            return
+        
+        st.success(f"🎯 Encontrados {total_archivos} archivos para {cis_procesados} CIs diferentes")
+        
+        # Mostrar ejemplos de archivos encontrados
+        with st.expander("📋 Ver primeros 10 archivos encontrados"):
+            for i, (archivo, ci, _) in enumerate(todos_documentos[:10]):
+                st.write(f"{i+1}. CI {ci}: {archivo.name}")
+        
+        # Configurar interfaz de progreso
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        resultados_container = st.container()
+        
+        # Procesar por lotes
+        for i in range(0, len(todos_documentos), tamaño_lote):
+            lote_actual = todos_documentos[i:i + tamaño_lote]
+            documentos_a_insertar = []
+            
+            for archivo_path, ci, metadatos in lote_actual:
+                # Verificar duplicados si no se permite sobrescribir
+                if not sobrescribir_existentes:
+                    existe = db.documentos.count_documents({
+                        "nombre_archivo": archivo_path.name,
+                        "ci": str(ci),
+                        "ruta_local": str(archivo_path)
+                    }) > 0
+                    
+                    if existe:
+                        documentos_duplicados += 1
+                        continue
+                
+                # Procesar archivo (solo metadatos, sin contenido binario)
+                documento, error = procesar_archivo_masivo_local(archivo_path, ci, metadatos, config)
+                
+                if error:
+                    documentos_fallidos += 1
+                    st.error(error)
+                else:
+                    documentos_a_insertar.append(documento)
+            
+            # Insertar lote en MongoDB
+            if documentos_a_insertar:
+                try:
+                    result = db.documentos.insert_many(documentos_a_insertar, ordered=False)
+                    documentos_exitosos += len(result.inserted_ids)
+                except Exception as e:
+                    documentos_fallidos += len(documentos_a_insertar)
+                    st.error(f"Error insertando lote: {str(e)}")
+            
+            archivos_procesados += len(lote_actual)
+            
+            # Actualizar progreso
+            progreso = archivos_procesados / len(todos_documentos)
+            progress_bar.progress(progreso)
+            status_text.text(
+                f"📊 Progreso: {archivos_procesados}/{len(todos_documentos)} | "
+                f"✅ Exitosos: {documentos_exitosos} | "
+                f"❌ Fallidos: {documentos_fallidos} | "
+                f"⚡ Duplicados: {documentos_duplicados}"
+            )
+            
+            # Pequeña pausa para no sobrecargar
+            time.sleep(0.1)
+        
+        # Mostrar resultados finales
+        progress_bar.progress(1.0)
+        status_text.text("✅ Procesamiento completado!")
+        
+        with resultados_container:
+            st.markdown("### 📈 Resultados Finales")
+            
+            # Métricas principales
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Archivos Encontrados", len(todos_documentos))
+            with col2:
+                st.metric("Procesados Exitosos", documentos_exitosos,
+                         delta=f"{(documentos_exitosos/len(todos_documentos)*100):.1f}%")
+            with col3:
+                st.metric("Fallidos", documentos_fallidos,
+                         delta=f"-{(documentos_fallidos/len(todos_documentos)*100):.1f}%" if documentos_fallidos > 0 else None,
+                         delta_color="inverse")
+            with col4:
+                st.metric("CIs Procesados", cis_procesados)
+            
+            if documentos_exitosos > 0:
+                st.success(f"🎉 Carga masiva completada! {documentos_exitosos} documentos procesados exitosamente.")
+                st.info("💾 Los archivos se mantienen en la carpeta local, solo los metadatos están en la base de datos.")
+                st.balloons()
+            
+            if documentos_duplicados > 0:
+                st.info(f"💡 {documentos_duplicados} documentos no se procesaron por duplicados. "
+                       "Marca 'Sobrescribir documentos existentes' para forzar el reprocesamiento.")
+                
+    except Exception as e:
+        st.error(f"❌ Error en el procesamiento masivo: {str(e)}")
+
 # --- APLICACIÓN PRINCIPAL ---
 
 if mongo_uri:
@@ -821,12 +1079,13 @@ if mongo_uri:
         st.markdown("---")
         st.markdown("## 📁 Gestión de Documentos")
         
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📝 Texto Simple", 
             "📄 Subir PDF", 
             "📝 Subir Word", 
             "📂 Todos los Documentos",
-            "🚀 Carga Masiva por CI"
+            "🚀 Carga Masiva por CI",
+            "💾 Carga Masiva (Archivos Locales)"
         ])
         
         # Pestaña 1: Texto Simple
@@ -1040,6 +1299,158 @@ if mongo_uri:
                     except Exception as e:
                         st.error(f"❌ Error en validación: {str(e)}")
 
+        # Pestaña 6: Carga Masiva con Archivos Locales
+        with tab6:
+            st.markdown("### 🚀 Carga Masiva de Archivos por CI (Sistema de Archivos)")
+            st.info("""
+            **Carga masiva manteniendo archivos en sistema local**
+            - Estructura: `C:/subir_archivos/archivos_con_CI_en_nombre.pdf`
+            - Solo metadatos en MongoDB, archivos permanecen en carpeta local
+            - Soporta: PDF, Word, imágenes, texto
+            - Hasta 10,000 documentos por carga
+            """)
+            
+            # Configuración en dos columnas
+            col_config1, col_config2 = st.columns(2)
+            
+            with col_config1:
+                st.markdown("#### 📁 Configuración de Carpetas")
+                ruta_base_local = st.text_input(
+                    "**Ruta de carpeta de archivos** *",
+                    value="C:\\subir_archivos\\",
+                    placeholder="C:\\subir_archivos\\",
+                    help="Ruta donde están todos los archivos (sin subcarpetas por CI)",
+                    key="ruta_base_local"
+                )
+                
+                tipos_archivo_local = st.multiselect(
+                    "**Tipos de archivo a procesar** *",
+                    ['.pdf', '.docx', '.doc', '.jpg', '.jpeg', '.png', '.txt'],
+                    default=['.pdf', '.docx', '.doc'],
+                    help="Selecciona los tipos de archivo a incluir",
+                    key="tipos_archivo_local"
+                )
+                
+                patron_busqueda = st.selectbox(
+                    "**Patrón de búsqueda de CI**",
+                    ["CI al inicio", "CI en cualquier parte", "CI específico en nombre"],
+                    help="Cómo buscar el CI en los nombres de archivo",
+                    key="patron_busqueda"
+                )
+            
+            with col_config2:
+                st.markdown("#### 📊 Configuración de Procesamiento")
+                max_documentos_local = st.number_input(
+                    "**Límite de documentos**",
+                    min_value=100,
+                    max_value=10000,
+                    value=3000,
+                    step=100,
+                    help="Máximo número de documentos a procesar",
+                    key="max_documentos_local"
+                )
+                
+                tamaño_lote_local = st.slider(
+                    "**Tamaño del lote**",
+                    min_value=50,
+                    max_value=500,
+                    value=100,
+                    help="Documentos procesados por lote (mejora performance)",
+                    key="tamaño_lote_local"
+                )
+                
+                sobrescribir_existentes_local = st.checkbox(
+                    "**Sobrescribir documentos existentes**",
+                    value=False,
+                    help="Reemplazar documentos que ya existen en la base de datos",
+                    key="sobrescribir_existentes_local"
+                )
+            
+            # Sección para CSV de metadatos
+            st.markdown("#### 📋 Archivo CSV con Metadatos")
+            st.info("""
+            **El CSV debe contener las columnas:**
+            - `ci` (obligatorio): Número de cédula (debe aparecer en el nombre del archivo)
+            - `nombre` (obligatorio): Nombre completo
+            - `titulo`: Título del documento (si no se especifica, se genera automáticamente)
+            - `categoria`: Categoría del documento
+            - `autor`: Autor del documento  
+            - `version`: Versión del documento
+            - `etiquetas`: Tags separados por comas
+            - `prioridad`: Baja, Media, Alta
+            
+            **Ejemplo de nombres de archivo:**
+            - `12345678_contrato.pdf`
+            - `87654321_identificacion.jpg`
+            - `contrato_11223344.docx`
+            """)
+            
+            archivo_csv_local = st.file_uploader(
+                "**Subir CSV con metadatos** *",
+                type=['csv'],
+                help="CSV con información de CI, nombres, títulos, etc.",
+                key="archivo_csv_local"
+            )
+            
+            # Previsualización del CSV
+            if archivo_csv_local:
+                try:
+                    df_metadatos_local = pd.read_csv(archivo_csv_local)
+                    st.success(f"✅ CSV cargado: {len(df_metadatos_local)} registros de CI encontrados")
+                    
+                    with st.expander("📊 Vista previa del CSV", expanded=True):
+                        st.dataframe(df_metadatos_local.head(10), use_container_width=True)
+                        
+                        # Estadísticas del CSV
+                        col_stats1, col_stats2, col_stats3 = st.columns(3)
+                        with col_stats1:
+                            st.metric("Total CIs", len(df_metadatos_local))
+                        with col_stats2:
+                            st.metric("Columnas", len(df_metadatos_local.columns))
+                        with col_stats3:
+                            cis_unicos = df_metadatos_local['ci'].nunique() if 'ci' in df_metadatos_local.columns else 0
+                            st.metric("CIs Únicos", cis_unicos)
+                
+                except Exception as e:
+                    st.error(f"❌ Error al leer el CSV: {str(e)}")
+            
+            # Botón de procesamiento
+            st.markdown("#### ⚡ Procesamiento Masivo")
+            
+            if st.button("🚀 Iniciar Carga Masiva (Archivos Locales)", type="primary", use_container_width=True, key="btn_carga_local"):
+                if not archivo_csv_local:
+                    st.error("❌ Debes subir un archivo CSV con los metadatos")
+                elif not ruta_base_local:
+                    st.error("❌ Debes especificar la ruta de la carpeta de archivos")
+                elif not tipos_archivo_local:
+                    st.error("❌ Debes seleccionar al menos un tipo de archivo")
+                else:
+                    # Validar estructura del CSV
+                    try:
+                        df_metadatos_local = pd.read_csv(archivo_csv_local)
+                        errores = validar_csv_metadatos(df_metadatos_local)
+                        
+                        if errores:
+                            st.error("❌ Errores en el CSV:")
+                            for error in errores:
+                                st.write(f"• {error}")
+                        else:
+                            # Procesar carga masiva con archivos locales
+                            with st.spinner("🔄 Iniciando procesamiento masivo (archivos locales)..."):
+                                resultado = procesar_carga_masiva_ci_local(
+                                    db=db,
+                                    ruta_base=ruta_base_local,
+                                    df_metadatos=df_metadatos_local,
+                                    tipos_archivo=tipos_archivo_local,
+                                    max_documentos=max_documentos_local,
+                                    tamaño_lote=tamaño_lote_local,
+                                    patron_busqueda=patron_busqueda,
+                                    sobrescribir_existentes=sobrescribir_existentes_local
+                                )
+                    
+                    except Exception as e:
+                        st.error(f"❌ Error en validación: {str(e)}")
+
     else:
         st.error(f"❌ {connection_message}")
 
@@ -1054,5 +1465,6 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
