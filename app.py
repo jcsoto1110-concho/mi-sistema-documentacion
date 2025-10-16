@@ -262,17 +262,25 @@ def mostrar_documento(doc, key_suffix=""):
         with col2:
             # Botones de acción
             st.write("")  # Espacio
-            if st.button("🗑️ Eliminar", key=f"delete_{doc['_id']}_{key_suffix}", use_container_width=True):
-                with st.spinner("Eliminando..."):
-                    db.documentos.delete_one({"_id": doc["_id"]})
-                    st.success("✅ Documento eliminado")
-                    time.sleep(1)
-                    st.rerun()
+            
+            # Usar un formulario para el botón de eliminar para manejar mejor el estado
+            with st.form(key=f"delete_form_{doc['_id']}_{key_suffix}"):
+                if st.form_submit_button("🗑️ Eliminar", use_container_width=True):
+                    with st.spinner("Eliminando..."):
+                        try:
+                            result = db.documentos.delete_one({"_id": doc["_id"]})
+                            if result.deleted_count > 0:
+                                st.success("✅ Documento eliminado")
+                                # Forzar rerenderización
+                                st.rerun()
+                            else:
+                                st.error("❌ No se pudo eliminar el documento")
+                        except Exception as e:
+                            st.error(f"❌ Error al eliminar: {str(e)}")
             
             if st.button("📋 Copiar ID", key=f"copy_{doc['_id']}_{key_suffix}", use_container_width=True):
                 st.code(str(doc['_id']), language='text')
                 st.success("ID copiado al portapapeles")
-
 # Formulario reutilizable para documentos
 def crear_formulario_documento(tipo_documento):
     """Crea un formulario reutilizable para diferentes tipos de documentos"""
@@ -1465,6 +1473,7 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
