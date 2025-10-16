@@ -13,7 +13,7 @@ from pathlib import Path
 
 # Configuración de la página
 st.set_page_config(
-    page_title="Sistema de Gestión Documental",
+    page_title="Sistema de Gestión Documental SCO",
     page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -1054,3 +1054,4 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
