@@ -87,7 +87,7 @@ with st.sidebar:
     st.markdown("## 🔐 Configuración")
     
     # Logo o imagen de la empresa
-    st.image("data:image/png;base64,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", width=80)
+    st.image("https://cdn-icons-png.flaticon.com/512/2721/2721264.png", width=80)
     
     mongo_uri = st.text_input(
         "**Cadena de Conexión MongoDB**",
@@ -416,7 +416,7 @@ def validar_y_guardar_documento(tipo_documento, variables_locales):
         st.error(f"❌ Error al guardar: {str(e)}")
         return False
 
-# --- FUNCIONES PARA CARGA MASIVA ---
+# --- FUNCIONES PARA CARGA MASIVA (VERSIÓN SIMPLIFICADA) ---
 
 def validar_excel_metadatos(df):
     """Valida la estructura del Excel de metadatos"""
@@ -650,47 +650,6 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
             with col4:
                 st.metric("CIs Procesados", cis_procesados)
             
-            # Resumen detallado
-            st.markdown("#### 📋 Resumen por Categoría")
-            try:
-                pipeline = [
-                    {"$match": {"procesado_masivo": True, "lote_carga": config['lote_id']}},
-                    {"$group": {"_id": "$categoria", "count": {"$sum": 1}}},
-                    {"$sort": {"count": -1}}
-                ]
-                resumen_categoria = list(db.documentos.aggregate(pipeline))
-                
-                if resumen_categoria:
-                    df_categoria = pd.DataFrame(resumen_categoria)
-                    df_categoria.columns = ['Categoría', 'Documentos']
-                    st.dataframe(df_categoria, use_container_width=True)
-            except Exception as e:
-                st.error(f"Error generando resumen: {e}")
-            
-            # Top CIs con más documentos
-            st.markdown("#### 👥 Top CIs con más documentos")
-            try:
-                pipeline = [
-                    {"$match": {"procesado_masivo": True, "lote_carga": config['lote_id']}},
-                    {"$group": {"_id": {"ci": "$ci", "nombre": "$nombre_completo"}, "count": {"$sum": 1}}},
-                    {"$sort": {"count": -1}},
-                    {"$limit": 10}
-                ]
-                top_cis = list(db.documentos.aggregate(pipeline))
-                
-                if top_cis:
-                    datos_top = []
-                    for item in top_cis:
-                        datos_top.append({
-                            'CI': item['_id']['ci'],
-                            'Nombre': item['_id']['nombre'],
-                            'Documentos': item['count']
-                        })
-                    df_top = pd.DataFrame(datos_top)
-                    st.dataframe(df_top, use_container_width=True)
-            except:
-                pass
-            
             if documentos_exitosos > 0:
                 st.success(f"🎉 Carga masiva completada! {documentos_exitosos} documentos procesados exitosamente.")
                 st.balloons()
@@ -702,10 +661,10 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
     except Exception as e:
         st.error(f"❌ Error en el procesamiento masivo: {str(e)}")
 
-# --- FUNCIÓN PARA CREAR PLANTILLA EXCEL ---
+# --- FUNCIÓN SIMPLIFICADA PARA CREAR PLANTILLA EXCEL ---
 
 def crear_plantilla_carga_masiva():
-    """Crea y descarga plantilla Excel para carga masiva"""
+    """Crea y descarga plantilla Excel para carga masiva (versión simplificada)"""
     
     datos_ejemplo = {
         'ci': ['12345678', '87654321', '11223344', '55667788', '99887766'],
@@ -724,49 +683,9 @@ def crear_plantilla_carga_masiva():
     
     df_plantilla = pd.DataFrame(datos_ejemplo)
     
-    # Crear archivo en memoria
+    # Crear archivo en memoria (versión simplificada sin xlsxwriter)
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_plantilla.to_excel(writer, sheet_name='Metadatos_CI', index=False)
-        
-        # Hoja de instrucciones
-        workbook = writer.book
-        worksheet_inst = workbook.add_worksheet('Instrucciones')
-        
-        instrucciones = [
-            "INSTRUCCIONES PARA CARGA MASIVA POR CI",
-            "",
-            "ESTRUCTURA DE CARPETAS:",
-            "C:/ruta/base/",
-            "├── 12345678/",
-            "│   ├── contrato.pdf",
-            "│   ├── identificacion.jpg",
-            "│   └── curriculum.docx",
-            "├── 87654321/",
-            "│   └── documento.pdf",
-            "└── ...",
-            "",
-            "COLUMNAS OBLIGATORIAS:",
-            "- ci: Número de cédula (debe coincidir con nombre de carpeta)",
-            "- nombre: Nombre completo de la persona",
-            "",
-            "COLUMNAS OPCIONALES:",
-            "- titulo: Título del documento (si no se especifica, se genera del nombre archivo)",
-            "- categoria: Legal, Identificación, Laboral, Educación, Personal, etc.",
-            "- autor: Quién creó el documento",
-            "- version: Versión del documento",
-            "- etiquetas: Separar con comas sin espacios",
-            "- prioridad: Alta, Media, Baja",
-            "",
-            "NOTAS:",
-            "- Máximo 10,000 documentos por carga",
-            "- Los CIs deben ser numéricos",
-            "- Las carpetas deben llamarse exactamente igual al CI"
-        ]
-        
-        for i, instruccion in enumerate(instrucciones):
-            worksheet_inst.write(i, 0, instruccion)
-    
+    df_plantilla.to_excel(output, index=False, sheet_name='Metadatos_CI')
     output.seek(0)
     
     # Botón de descarga
@@ -781,6 +700,41 @@ def crear_plantilla_carga_masiva():
     </a>
     '''
     st.markdown(href, unsafe_allow_html=True)
+    
+    # Mostrar instrucciones
+    with st.expander("📋 Instrucciones para la plantilla"):
+        st.markdown("""
+        **INSTRUCCIONES PARA CARGA MASIVA POR CI**
+        
+        **ESTRUCTURA DE CARPETAS:**
+        ```
+        C:/ruta/base/
+        ├── 12345678/
+        │   ├── contrato.pdf
+        │   ├── identificacion.jpg
+        │   └── curriculum.docx
+        ├── 87654321/
+        │   └── documento.pdf
+        └── ...
+        ```
+        
+        **COLUMNAS OBLIGATORIAS:**
+        - `ci`: Número de cédula (debe coincidir con nombre de carpeta)
+        - `nombre`: Nombre completo de la persona
+        
+        **COLUMNAS OPCIONALES:**
+        - `titulo`: Título del documento (si no se especifica, se genera del nombre archivo)
+        - `categoria`: Legal, Identificación, Laboral, Educación, Personal, etc.
+        - `autor`: Quién creó el documento
+        - `version`: Versión del documento  
+        - `etiquetas`: Separar con comas sin espacios
+        - `prioridad`: Alta, Media, Baja
+        
+        **NOTAS:**
+        - Máximo 10,000 documentos por carga
+        - Los CIs deben ser numéricos
+        - Las carpetas deben llamarse exactamente igual al CI
+        """)
 
 # --- APLICACIÓN PRINCIPAL ---
 
@@ -1100,9 +1054,3 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
-
-
-
-
-
-
