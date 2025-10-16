@@ -290,7 +290,7 @@ def crear_formulario_documento(tipo_documento):
             )
             categoria = st.selectbox(
                 "**Categoría** *",
-                ["Técnica", "Usuario", "API", "Tutorial", "Referencia", "Procedimiento", "Política", "Otros"],
+                ["Técnica", "Usuario", "API", "Tutorial", "prueba", "Procedimiento", "Política", "Otros"],
                 help="Categoría principal del documento"
             )
             autor = st.text_input(
@@ -1054,4 +1054,5 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
