@@ -281,6 +281,21 @@ def mostrar_documento(doc, key_suffix=""):
             if st.button("📋 Copiar ID", key=f"copy_{doc['_id']}_{key_suffix}", use_container_width=True):
                 st.code(str(doc['_id']), language='text')
                 st.success("ID copiado al portapapeles")
+
+def eliminar_documento(documento_id):
+    """Función para eliminar un documento de la base de datos"""
+    try:
+        result = db.documentos.delete_one({"_id": documento_id})
+        if result.deleted_count > 0:
+            st.success("✅ Documento eliminado exitosamente")
+            return True
+        else:
+            st.error("❌ No se encontró el documento para eliminar")
+            return False
+    except Exception as e:
+        st.error(f"❌ Error al eliminar documento: {str(e)}")
+        return False
+
 # Formulario reutilizable para documentos
 def crear_formulario_documento(tipo_documento):
     """Crea un formulario reutilizable para diferentes tipos de documentos"""
@@ -1473,6 +1488,7 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
