@@ -8,7 +8,6 @@ from bson import Binary
 from bson.binary import Binary
 import tempfile
 import pandas as pd
-from PIL import Image
 import time
 from pathlib import Path
 
@@ -416,10 +415,10 @@ def validar_y_guardar_documento(tipo_documento, variables_locales):
         st.error(f"❌ Error al guardar: {str(e)}")
         return False
 
-# --- FUNCIONES PARA CARGA MASIVA (VERSIÓN SIMPLIFICADA) ---
+# --- FUNCIONES PARA CARGA MASIVA (VERSIÓN CSV) ---
 
-def validar_excel_metadatos(df):
-    """Valida la estructura del Excel de metadatos"""
+def validar_csv_metadatos(df):
+    """Valida la estructura del CSV de metadatos"""
     errores = []
     
     # Campos obligatorios
@@ -551,7 +550,7 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
         
         st.info("🔍 Buscando archivos en carpetas CI...")
         
-        # Buscar archivos para cada CI en el Excel
+        # Buscar archivos para cada CI en el CSV
         for _, fila in df_metadatos.iterrows():
             ci = fila['ci']
             archivos_ci = buscar_archivos_por_ci(ruta_base, ci, tipos_archivo, procesar_subcarpetas)
@@ -661,10 +660,10 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
     except Exception as e:
         st.error(f"❌ Error en el procesamiento masivo: {str(e)}")
 
-# --- FUNCIÓN SIMPLIFICADA PARA CREAR PLANTILLA EXCEL ---
+# --- FUNCIÓN SIMPLIFICADA PARA CREAR PLANTILLA CSV ---
 
 def crear_plantilla_carga_masiva():
-    """Crea y descarga plantilla Excel para carga masiva (versión simplificada)"""
+    """Crea y descarga plantilla CSV para carga masiva"""
     
     datos_ejemplo = {
         'ci': ['12345678', '87654321', '11223344', '55667788', '99887766'],
@@ -683,20 +682,20 @@ def crear_plantilla_carga_masiva():
     
     df_plantilla = pd.DataFrame(datos_ejemplo)
     
-    # Crear archivo en memoria (versión simplificada sin xlsxwriter)
+    # Crear archivo CSV en memoria
     output = io.BytesIO()
-    df_plantilla.to_excel(output, index=False, sheet_name='Metadatos_CI')
+    df_plantilla.to_csv(output, index=False, encoding='utf-8')
     output.seek(0)
     
-    # Botón de descarga
+    # Botón de descarga CSV
     b64 = base64.b64encode(output.read()).decode()
     href = f'''
-    <a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" 
-       download="plantilla_carga_masiva_ci.xlsx" 
+    <a href="data:text/csv;base64,{b64}" 
+       download="plantilla_carga_masiva_ci.csv" 
        style="background-color: #2196F3; color: white; padding: 12px 20px; 
               text-decoration: none; border-radius: 5px; display: inline-block;
               font-weight: bold; font-size: 16px;">
-       📥 Descargar Plantilla Excel
+       📥 Descargar Plantilla CSV
     </a>
     '''
     st.markdown(href, unsafe_allow_html=True)
@@ -734,6 +733,7 @@ def crear_plantilla_carga_masiva():
         - Máximo 10,000 documentos por carga
         - Los CIs deben ser numéricos
         - Las carpetas deben llamarse exactamente igual al CI
+        - Puedes usar Excel o cualquier editor de texto para crear el CSV
         """)
 
 # --- APLICACIÓN PRINCIPAL ---
@@ -902,7 +902,7 @@ if mongo_uri:
             **Carga masiva de documentos organizados por carpetas de CI**
             - Estructura: `C:/ruta/carpetas/CI/archivos.pdf`
             - Soporta: PDF, Word, imágenes, texto
-            - Metadatos automáticos desde Excel
+            - Metadatos automáticos desde CSV
             - Hasta 10,000 documentos por carga
             """)
             
@@ -956,10 +956,10 @@ if mongo_uri:
                     help="Reemplazar documentos que ya existen en la base de datos"
                 )
             
-            # Sección para Excel de metadatos
-            st.markdown("#### 📋 Archivo Excel con Metadatos")
+            # Sección para CSV de metadatos
+            st.markdown("#### 📋 Archivo CSV con Metadatos")
             st.info("""
-            **El Excel debe contener las columnas:**
+            **El CSV debe contener las columnas:**
             - `ci` (obligatorio): Número de cédula
             - `nombre` (obligatorio): Nombre completo
             - `titulo`: Título del documento (si no se especifica, se genera automáticamente)
@@ -970,22 +970,22 @@ if mongo_uri:
             - `prioridad`: Baja, Media, Alta
             """)
             
-            archivo_excel = st.file_uploader(
-                "**Subir Excel con metadatos** *",
-                type=['xlsx', 'xls'],
-                help="Excel con información de CI, nombres, títulos, etc."
+            archivo_csv = st.file_uploader(
+                "**Subir CSV con metadatos** *",
+                type=['csv'],
+                help="CSV con información de CI, nombres, títulos, etc."
             )
             
-            # Previsualización del Excel
-            if archivo_excel:
+            # Previsualización del CSV
+            if archivo_csv:
                 try:
-                    df_metadatos = pd.read_excel(archivo_excel)
-                    st.success(f"✅ Excel cargado: {len(df_metadatos)} registros de CI encontrados")
+                    df_metadatos = pd.read_csv(archivo_csv)
+                    st.success(f"✅ CSV cargado: {len(df_metadatos)} registros de CI encontrados")
                     
-                    with st.expander("📊 Vista previa del Excel", expanded=True):
+                    with st.expander("📊 Vista previa del CSV", expanded=True):
                         st.dataframe(df_metadatos.head(10), use_container_width=True)
                         
-                        # Estadísticas del Excel
+                        # Estadísticas del CSV
                         col_stats1, col_stats2, col_stats3 = st.columns(3)
                         with col_stats1:
                             st.metric("Total CIs", len(df_metadatos))
@@ -996,7 +996,7 @@ if mongo_uri:
                             st.metric("CIs Únicos", cis_unicos)
                 
                 except Exception as e:
-                    st.error(f"❌ Error al leer el Excel: {str(e)}")
+                    st.error(f"❌ Error al leer el CSV: {str(e)}")
             
             # Sección para descargar plantilla
             st.markdown("---")
@@ -1007,20 +1007,20 @@ if mongo_uri:
             st.markdown("#### ⚡ Procesamiento Masivo")
             
             if st.button("🚀 Iniciar Carga Masiva", type="primary", use_container_width=True):
-                if not archivo_excel:
-                    st.error("❌ Debes subir un archivo Excel con los metadatos")
+                if not archivo_csv:
+                    st.error("❌ Debes subir un archivo CSV con los metadatos")
                 elif not ruta_base:
                     st.error("❌ Debes especificar la ruta base de las carpetas CI")
                 elif not tipos_archivo:
                     st.error("❌ Debes seleccionar al menos un tipo de archivo")
                 else:
-                    # Validar estructura del Excel
+                    # Validar estructura del CSV
                     try:
-                        df_metadatos = pd.read_excel(archivo_excel)
-                        errores = validar_excel_metadatos(df_metadatos)
+                        df_metadatos = pd.read_csv(archivo_csv)
+                        errores = validar_csv_metadatos(df_metadatos)
                         
                         if errores:
-                            st.error("❌ Errores en el Excel:")
+                            st.error("❌ Errores en el CSV:")
                             for error in errores:
                                 st.write(f"• {error}")
                         else:
