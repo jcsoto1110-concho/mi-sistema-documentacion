@@ -1073,9 +1073,11 @@ if mongo_uri:
                     filtros_adicionales["categoria"] = filtro_categoria_busq
                 if filtro_prioridad_busq != "Todas":
                     filtros_adicionales["prioridad"] = filtro_prioridad_busq
-                # AGREGAR TIMESTAMP PARA INVALIDAR CACHE
-        cache_key = f"busqueda_{criterio_busqueda}_{tipo_busqueda}_{st.session_state.get('last_delete_time', '')}"
-                documentos_encontrados, error = buscar_documentos(
+        
+        # AGREGAR TIMESTAMP PARA INVALIDAR CACHE
+        #cache_key = f"busqueda_{criterio_busqueda}_{tipo_busqueda}_{st.session_state.get('last_delete_time', '')}"
+     
+        documentos_encontrados, error = buscar_documentos(
                     db, criterio_busqueda, tipo_busqueda, filtros_adicionales
                 )
                 
@@ -1483,6 +1485,7 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
