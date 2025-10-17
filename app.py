@@ -190,16 +190,16 @@ with st.sidebar:
             st.markdown("### 📊 Estadísticas")
             
             # Métricas principales
-            st.metric("📄 Total Documentos", total_docs, key="total_docs_metric")
+            st.metric("📄 Total Documentos", total_docs)
             
             # Estadísticas por tipo
             col1, col2 = st.columns(2)
             with col1:
-                st.metric("📝 Texto", text_count, key="text_count_metric")
-                st.metric("📄 PDF", pdf_count, key="pdf_count_metric")
+                st.metric("📝 Texto", text_count)
+                st.metric("📄 PDF", pdf_count)
             with col2:
-                st.metric("📋 Word", word_count, key="word_count_metric")
-                st.metric("🖼️ Imágenes", image_count, key="image_count_metric")
+                st.metric("📋 Word", word_count)
+                st.metric("🖼️ Imágenes", image_count)
                 
         except Exception as e:
             st.error(f"❌ Error obteniendo estadísticas: {str(e)}")
@@ -750,13 +750,13 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
             # Métricas principales
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Archivos Encontrados", len(todos_documentos), key="archivos_encontrados_metric")
+                st.metric("Archivos Encontrados", len(todos_documentos))
             with col2:
-                st.metric("Procesados Exitosos", documentos_exitosos, key="exitosos_metric")
+                st.metric("Procesados Exitosos", documentos_exitosos)
             with col3:
-                st.metric("Fallidos", documentos_fallidos, key="fallidos_metric")
+                st.metric("Fallidos", documentos_fallidos)
             with col4:
-                st.metric("CIs Procesados", cis_procesados, key="cis_procesados_metric")
+                st.metric("CIs Procesados", cis_procesados)
             
             if documentos_exitosos > 0:
                 st.success(f"🎉 Carga masiva completada! {documentos_exitosos} documentos procesados exitosamente.")
@@ -1081,12 +1081,12 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                     # Estadísticas del CSV
                     col_stats1, col_stats2, col_stats3 = st.columns(3)
                     with col_stats1:
-                        st.metric("Total CIs", len(df_metadatos), key="total_cis_tab6")
+                        st.metric("Total CIs", len(df_metadatos))
                     with col_stats2:
-                        st.metric("Columnas", len(df_metadatos.columns), key="columnas_tab6")
+                        st.metric("Columnas", len(df_metadatos.columns))
                     with col_stats3:
                         cis_unicos = df_metadatos['ci'].nunique() if 'ci' in df_metadatos.columns else 0
-                        st.metric("CIs Únicos", cis_unicos, key="cis_unicos_tab6")
+                        st.metric("CIs Únicos", cis_unicos)
             
             except Exception as e:
                 st.error(f"❌ Error al leer el CSV: {str(e)}")
