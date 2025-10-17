@@ -33,6 +33,10 @@ if 'current_user' not in st.session_state:
     st.session_state.current_user = "No conectado"
 if 'mongo_username' not in st.session_state:
     st.session_state.mongo_username = "Desconocido"
+if 'df_metadatos_local' not in st.session_state:
+    st.session_state.df_metadatos_local = None
+if 'df_metadatos_masiva' not in st.session_state:
+    st.session_state.df_metadatos_masiva = None
 
 # CSS personalizado para mejorar la apariencia
 st.markdown("""
@@ -1041,66 +1045,51 @@ def cargar_y_validar_csv(archivo_csv, nombre_funcionalidad="carga"):
         if archivo_csv.size == 0:
             return None, "El archivo CSV está vacío"
         
-        # Guardar la posición actual del archivo
-        current_position = archivo_csv.tell()
+        # Leer el contenido completo primero
+        contenido = archivo_csv.getvalue().decode('utf-8')
         
-        # Intentar leer el CSV con diferentes enfoques
-        df = None
-        error_messages = []
+        # Verificar que el contenido no esté vacío
+        if not contenido.strip():
+            return None, "El archivo CSV está vacío"
         
-        # Método 1: Leer normalmente
+        # Dividir en líneas
+        lineas = contenido.strip().split('\n')
+        
+        # Verificar que hay al menos una línea (header)
+        if len(lineas) == 0:
+            return None, "El archivo CSV no contiene datos"
+        
+        # Verificar que hay al menos una fila de datos (además del header)
+        if len(lineas) < 2:
+            return None, "El archivo CSV no contiene filas de datos"
+        
+        # Intentar leer con pandas
         try:
-            archivo_csv.seek(current_position)
+            # Resetear el archivo para pandas
+            archivo_csv.seek(0)
             df = pd.read_csv(archivo_csv)
-            st.success("✅ CSV cargado con método estándar")
-        except Exception as e1:
-            error_messages.append(f"Método 1: {str(e1)}")
-            
-            # Método 2: Leer con diferentes separadores
+        except Exception as e:
+            # Si falla pandas, intentar procesamiento manual
             try:
-                archivo_csv.seek(current_position)
-                df = pd.read_csv(archivo_csv, sep=None, engine='python')
-                st.success("✅ CSV cargado con detector de separadores")
-            except Exception as e2:
-                error_messages.append(f"Método 2: {str(e2)}")
+                # Procesar manualmente
+                headers = lineas[0].split(',')
+                data = []
                 
-                # Método 3: Leer con encoding específico
-                try:
-                    archivo_csv.seek(current_position)
-                    df = pd.read_csv(archivo_csv, encoding='latin-1')
-                    st.success("✅ CSV cargado con encoding latin-1")
-                except Exception as e3:
-                    error_messages.append(f"Método 3: {str(e3)}")
-                    
-                    # Método 4: Leer manualmente
-                    try:
-                        archivo_csv.seek(current_position)
-                        content = archivo_csv.read().decode('utf-8')
-                        lines = content.strip().split('\n')
-                        
-                        # Verificar que hay al menos una línea
-                        if len(lines) == 0:
-                            return None, "El archivo está vacío"
-                            
-                        # Procesar manualmente
-                        headers = lines[0].split('\t') if '\t' in lines[0] else lines[0].split(',')
-                        data = []
-                        
-                        for line in lines[1:]:
-                            if line.strip():  # Saltar líneas vacías
-                                values = line.split('\t') if '\t' in line else line.split(',')
-                                data.append(values)
-                        
-                        df = pd.DataFrame(data, columns=headers)
-                        st.success("✅ CSV cargado con procesamiento manual")
-                        
-                    except Exception as e4:
-                        error_messages.append(f"Método 4: {str(e4)}")
-                        return None, f"No se pudo leer el CSV. Errores: {' | '.join(error_messages)}"
-        
-        # Verificar que se cargó algún DataFrame
-        if df is None:
-            return None, "No se pudo cargar el CSV con ningún método"
+                for line in lineas[1:]:
+                    if line.strip():  # Saltar líneas vacías
+                        values = line.split(',')
+                        # Asegurar que tenga el mismo número de columnas que el header
+                        if len(values) == len(headers):
+                            data.append(values)
+                
+                if len(data) == 0:
+                    return None, "No se encontraron filas de datos válidas"
+                
+                df = pd.DataFrame(data, columns=headers)
+                st.success("✅ CSV cargado con procesamiento manual")
+                
+            except Exception as e2:
+                return None, f"No se pudo leer el CSV: {str(e2)}"
         
         # Validar que el DataFrame no esté vacío
         if df.empty:
@@ -1110,25 +1099,11 @@ def cargar_y_validar_csv(archivo_csv, nombre_funcionalidad="carga"):
         if len(df.columns) == 0:
             return None, "El archivo CSV no tiene columnas identificables"
         
-        # Limpiar nombres de columnas (eliminar espacios extras)
+        # Limpiar nombres de columnas
         df.columns = df.columns.str.strip()
         
         # Mostrar información del CSV cargado
         st.success(f"✅ CSV cargado exitosamente: {len(df)} registros, {len(df.columns)} columnas")
-        
-        # Mostrar preview del CSV
-        with st.expander("📊 Vista previa del CSV cargado", expanded=True):
-            st.write("**Primeras 5 filas:**")
-            st.dataframe(df.head(), use_container_width=True)
-            
-            st.write("**Información de columnas:**")
-            col_info = pd.DataFrame({
-                'Columna': df.columns,
-                'Tipo': df.dtypes.values,
-                'No nulos': df.notna().sum().values,
-                'Ejemplo': df.iloc[0].values if len(df) > 0 else ['N/A'] * len(df.columns)
-            })
-            st.dataframe(col_info, use_container_width=True)
         
         # Validar estructura específica
         errores = validar_csv_metadatos(df)
@@ -1211,6 +1186,8 @@ with st.sidebar:
         st.session_state.db_connected = False
         st.session_state.current_user = "No conectado"
         st.session_state.mongo_username = "Desconocido"
+        st.session_state.df_metadatos_local = None
+        st.session_state.df_metadatos_masiva = None
         st.session_state.last_delete_time = datetime.now().timestamp()
         st.success("🔓 Desconectado de la base de datos")
         st.rerun()
@@ -1528,13 +1505,38 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         # Previsualización del CSV
         if archivo_csv:
             try:
-                df_metadatos, error_csv = cargar_y_validar_csv(archivo_csv, "carga masiva")
+                # Solo cargar y mostrar preview, no procesar todavía
+                content = archivo_csv.getvalue().decode('utf-8')
+                lines = content.split('\n')
                 
-                if error_csv:
-                    st.error(f"❌ Error en el CSV: {error_csv}")
-                else:
-                    st.success(f"✅ CSV cargado: {len(df_metadatos)} registros de CI encontrados")
-                    
+                st.success(f"✅ Archivo CSV cargado: {len(lines)} líneas detectadas")
+                
+                # Mostrar vista previa simple sin consumir el archivo
+                with st.expander("📊 Vista previa del CSV (primeras 5 líneas)", expanded=True):
+                    st.write("**Contenido del CSV:**")
+                    for i, line in enumerate(lines[:6]):  # Mostrar header + 5 filas
+                        st.text(f"Línea {i+1}: {line}")
+                
+                # Botón para cargar y validar el CSV
+                if st.button("🔍 Validar estructura del CSV", key="validar_csv_tab6"):
+                    with st.spinner("Validando CSV..."):
+                        # Resetear el archivo para leerlo desde el inicio
+                        archivo_csv.seek(0)
+                        df_metadatos, error_csv = cargar_y_validar_csv(archivo_csv, "carga masiva")
+                        
+                        if error_csv:
+                            st.error(f"❌ Error en el CSV: {error_csv}")
+                        else:
+                            st.session_state.df_metadatos_masiva = df_metadatos
+                            st.success(f"✅ CSV validado correctamente: {len(df_metadatos)} registros de {df_metadatos['ci'].nunique()} CIs diferentes")
+                            
+                            # Mostrar resumen del CSV validado
+                            with st.expander("📋 Resumen del CSV validado", expanded=True):
+                                st.dataframe(df_metadatos.head(), use_container_width=True)
+                                st.write(f"**Total de registros:** {len(df_metadatos)}")
+                                st.write(f"**CIs únicos:** {df_metadatos['ci'].nunique()}")
+                                st.write(f"**Columnas:** {list(df_metadatos.columns)}")
+            
             except Exception as e:
                 st.error(f"❌ Error al leer el CSV: {str(e)}")
         
@@ -1547,38 +1549,31 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         st.markdown("#### ⚡ Procesamiento Masivo")
         
         if st.button("🚀 Iniciar Carga Masiva", type="primary", use_container_width=True, key="btn_carga_masiva_tab6"):
-            if not archivo_csv:
-                st.error("❌ Debes subir un archivo CSV con los metadatos")
+            if st.session_state.df_metadatos_masiva is None:
+                st.error("❌ Primero debes validar el CSV usando el botón 'Validar estructura del CSV'")
             elif not ruta_base:
                 st.error("❌ Debes especificar la ruta base de las carpetas CI")
             elif not tipos_archivo:
                 st.error("❌ Debes seleccionar al menos un tipo de archivo")
             else:
-                # Validar estructura del CSV
-                try:
-                    df_metadatos, error_csv = cargar_y_validar_csv(archivo_csv, "carga masiva")
-                    
-                    if error_csv:
-                        st.error(f"❌ Error en el CSV: {error_csv}")
-                    else:
-                        # Mostrar resumen antes de procesar
-                        st.info(f"📋 **Resumen a procesar:** {len(df_metadatos)} documentos de {df_metadatos['ci'].nunique()} CIs diferentes")
-                        
-                        # Procesar carga masiva
-                        with st.spinner("🔄 Iniciando procesamiento masivo..."):
-                            resultado = procesar_carga_masiva_ci(
-                                db=db,
-                                ruta_base=ruta_base,
-                                df_metadatos=df_metadatos,
-                                tipos_archivo=tipos_archivo,
-                                max_documentos=max_documentos,
-                                tamaño_lote=tamaño_lote,
-                                procesar_subcarpetas=procesar_subcarpetas,
-                                sobrescribir_existentes=sobrescribir_existentes
-                            )
+                # Usar el DataFrame ya validado del session_state
+                df_metadatos = st.session_state.df_metadatos_masiva
                 
-                except Exception as e:
-                    st.error(f"❌ Error en validación: {str(e)}")
+                # Mostrar resumen antes de procesar
+                st.info(f"📋 **Resumen a procesar:** {len(df_metadatos)} documentos de {df_metadatos['ci'].nunique()} CIs diferentes")
+                
+                # Procesar carga masiva
+                with st.spinner("🔄 Iniciando procesamiento masivo..."):
+                    resultado = procesar_carga_masiva_ci(
+                        db=db,
+                        ruta_base=ruta_base,
+                        df_metadatos=df_metadatos,
+                        tipos_archivo=tipos_archivo,
+                        max_documentos=max_documentos,
+                        tamaño_lote=tamaño_lote,
+                        procesar_subcarpetas=procesar_subcarpetas,
+                        sobrescribir_existentes=sobrescribir_existentes
+                    )
 
     # PESTAÑA 7: Carga Masiva con Archivos Locales
     with tab7:
@@ -1673,88 +1668,79 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
             help="CSV con información de CI, nombres, títulos, etc.",
             key="archivo_csv_local_tab7"
         )
-
-
-
-    # Inicializar session_state para el DataFrame
-    if 'df_metadatos_local' not in st.session_state:
-        st.session_state.df_metadatos_local = None
-    
-    # Previsualización del CSV - SOLO MOSTRAR, NO PROCESAR
-    if archivo_csv_local:
-        try:
-            # Solo cargar y mostrar preview, no procesar todavía
-            content = archivo_csv_local.getvalue().decode('utf-8')
-            lines = content.split('\n')
-            
-            st.success(f"✅ Archivo CSV cargado: {len(lines)} líneas detectadas")
-            
-            # Mostrar vista previa simple sin consumir el archivo
-            with st.expander("📊 Vista previa del CSV (primeras 5 líneas)", expanded=True):
-                st.write("**Contenido del CSV:**")
-                for i, line in enumerate(lines[:6]):  # Mostrar header + 5 filas
-                    st.text(f"Línea {i+1}: {line}")
-            
-            # Botón para cargar y validar el CSV
-            if st.button("🔍 Validar estructura del CSV", key="validar_csv_tab7"):
-                with st.spinner("Validando CSV..."):
-                    # Resetear el archivo para leerlo desde el inicio
-                    archivo_csv_local.seek(0)
-                    df_metadatos_local, error_csv = cargar_y_validar_csv(archivo_csv_local, "carga local")
-                    
-                    if error_csv:
-                        st.error(f"❌ Error en el CSV: {error_csv}")
-                    else:
-                        st.session_state.df_metadatos_local = df_metadatos_local
-                        st.success(f"✅ CSV validado correctamente: {len(df_metadatos_local)} registros de {df_metadatos_local['ci'].nunique()} CIs diferentes")
-                        
-                        # Mostrar resumen del CSV validado
-                        with st.expander("📋 Resumen del CSV validado", expanded=True):
-                            st.dataframe(df_metadatos_local.head(), use_container_width=True)
-                            st.write(f"**Total de registros:** {len(df_metadatos_local)}")
-                            st.write(f"**CIs únicos:** {df_metadatos_local['ci'].nunique()}")
-                            st.write(f"**Columnas:** {list(df_metadatos_local.columns)}")
         
-        except Exception as e:
-            st.error(f"❌ Error al leer el CSV: {str(e)}")
-    
-    # Botón de procesamiento - USAR EL DATAFRAME DEL SESSION_STATE
-    st.markdown("#### ⚡ Procesamiento Local")
-    
-    if st.button("🚀 Iniciar Carga Local", type="primary", use_container_width=True, key="btn_carga_local_tab7"):
-        if st.session_state.df_metadatos_local is None:
-            st.error("❌ Primero debes validar el CSV usando el botón 'Validar estructura del CSV'")
-        elif not ruta_base_local:
-            st.error("❌ Debes especificar la ruta de la carpeta de archivos")
-        elif not tipos_archivo_local:
-            st.error("❌ Debes seleccionar al menos un tipo de archivo")
-        else:
-            # Usar el DataFrame ya validado del session_state
-            df_metadatos_local = st.session_state.df_metadatos_local
-            
-            # Verificar que la ruta existe
-            ruta_path = Path(ruta_base_local)
-            if not ruta_path.exists():
-                st.error(f"❌ La ruta especificada no existe: {ruta_base_local}")
-            else:
-                # Mostrar resumen antes de procesar
-                st.info(f"📋 **Resumen a procesar:** {len(df_metadatos_local)} registros de {df_metadatos_local['ci'].nunique()} CIs diferentes")
+        # Previsualización del CSV - SOLO MOSTRAR, NO PROCESAR
+        if archivo_csv_local:
+            try:
+                # Solo cargar y mostrar preview, no procesar todavía
+                content = archivo_csv_local.getvalue().decode('utf-8')
+                lines = content.split('\n')
                 
-                # Procesar carga local
-                with st.spinner("🔄 Iniciando procesamiento local..."):
-                    resultado = procesar_carga_local(
-                        db=db,
-                        ruta_base=ruta_base_local,
-                        df_metadatos=df_metadatos_local,
-                        tipos_archivo=tipos_archivo_local,
-                        max_documentos=max_documentos_local,
-                        tamaño_lote=tamaño_lote_local,
-                        patron_busqueda=patron_busqueda,
-                        sobrescribir_existentes=sobrescribir_existentes_local
-                    )
-       
-                except Exception as e:
-                    st.error(f"❌ Error en validación: {str(e)}")
+                st.success(f"✅ Archivo CSV cargado: {len(lines)} líneas detectadas")
+                
+                # Mostrar vista previa simple sin consumir el archivo
+                with st.expander("📊 Vista previa del CSV (primeras 5 líneas)", expanded=True):
+                    st.write("**Contenido del CSV:**")
+                    for i, line in enumerate(lines[:6]):  # Mostrar header + 5 filas
+                        st.text(f"Línea {i+1}: {line}")
+                
+                # Botón para cargar y validar el CSV
+                if st.button("🔍 Validar estructura del CSV", key="validar_csv_tab7"):
+                    with st.spinner("Validando CSV..."):
+                        # Resetear el archivo para leerlo desde el inicio
+                        archivo_csv_local.seek(0)
+                        df_metadatos_local, error_csv = cargar_y_validar_csv(archivo_csv_local, "carga local")
+                        
+                        if error_csv:
+                            st.error(f"❌ Error en el CSV: {error_csv}")
+                        else:
+                            st.session_state.df_metadatos_local = df_metadatos_local
+                            st.success(f"✅ CSV validado correctamente: {len(df_metadatos_local)} registros de {df_metadatos_local['ci'].nunique()} CIs diferentes")
+                            
+                            # Mostrar resumen del CSV validado
+                            with st.expander("📋 Resumen del CSV validado", expanded=True):
+                                st.dataframe(df_metadatos_local.head(), use_container_width=True)
+                                st.write(f"**Total de registros:** {len(df_metadatos_local)}")
+                                st.write(f"**CIs únicos:** {df_metadatos_local['ci'].nunique()}")
+                                st.write(f"**Columnas:** {list(df_metadatos_local.columns)}")
+            
+            except Exception as e:
+                st.error(f"❌ Error al leer el CSV: {str(e)}")
+        
+        # Botón de procesamiento - USAR EL DATAFRAME DEL SESSION_STATE
+        st.markdown("#### ⚡ Procesamiento Local")
+        
+        if st.button("🚀 Iniciar Carga Local", type="primary", use_container_width=True, key="btn_carga_local_tab7"):
+            if st.session_state.df_metadatos_local is None:
+                st.error("❌ Primero debes validar el CSV usando el botón 'Validar estructura del CSV'")
+            elif not ruta_base_local:
+                st.error("❌ Debes especificar la ruta de la carpeta de archivos")
+            elif not tipos_archivo_local:
+                st.error("❌ Debes seleccionar al menos un tipo de archivo")
+            else:
+                # Usar el DataFrame ya validado del session_state
+                df_metadatos_local = st.session_state.df_metadatos_local
+                
+                # Verificar que la ruta existe
+                ruta_path = Path(ruta_base_local)
+                if not ruta_path.exists():
+                    st.error(f"❌ La ruta especificada no existe: {ruta_base_local}")
+                else:
+                    # Mostrar resumen antes de procesar
+                    st.info(f"📋 **Resumen a procesar:** {len(df_metadatos_local)} registros de {df_metadatos_local['ci'].nunique()} CIs diferentes")
+                    
+                    # Procesar carga local
+                    with st.spinner("🔄 Iniciando procesamiento local..."):
+                        resultado = procesar_carga_local(
+                            db=db,
+                            ruta_base=ruta_base_local,
+                            df_metadatos=df_metadatos_local,
+                            tipos_archivo=tipos_archivo_local,
+                            max_documentos=max_documentos_local,
+                            tamaño_lote=tamaño_lote_local,
+                            patron_busqueda=patron_busqueda,
+                            sobrescribir_existentes=sobrescribir_existentes_local
+                        )
 
 else:
     st.info("👈 Configura la conexión a MongoDB en la barra lateral para comenzar")
@@ -1767,4 +1753,3 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
-
