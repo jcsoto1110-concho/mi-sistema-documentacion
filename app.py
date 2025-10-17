@@ -11,6 +11,8 @@ import pandas as pd
 import time
 from pathlib import Path
 import re
+from pathlib import Path
+import os
 
 # Configuración de la página
 st.set_page_config(
@@ -1771,6 +1773,7 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
