@@ -1576,300 +1576,172 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                     )
 
     # PESTAÑA 7: Carga Masiva con Archivos Locales
-  # --- MODIFICAR LA PESTAÑA 7: CARGA LOCAL ---
-
-with tab7:
-    st.markdown("### 💾 Carga Masiva Local (Subir Archivos)")
-    st.info(f"""
-    **Carga masiva subiendo archivos directamente**
-    - Sube los archivos que quieres procesar
-    - Los metadatos se almacenan en MongoDB
-    - Soporta: PDF, Word, imágenes, texto
-    - Hasta 100 archivos por carga
-    - **Usuario de BD:** 👤 {st.session_state.mongo_username}
-    """)
-    
-    # Configuración en dos columnas
-    col_config1, col_config2 = st.columns(2)
-    
-    with col_config1:
-        st.markdown("#### 📁 Configuración de Archivos")
+    with tab7:
+        st.markdown("### 💾 Carga Masiva Local (Archivos en Sistema)")
+        st.info(f"""
+        **Carga masiva manteniendo archivos en sistema local**
+        - Los archivos permanecen en su ubicación original
+        - Solo los metadatos se almacenan en MongoDB
+        - Soporta: PDF, Word, imágenes, texto
+        - Hasta 10,000 documentos por carga
+        - **Usuario de BD:** 👤 {st.session_state.mongo_username}
+        """)
         
-        # En lugar de ruta local, permitir subir archivos directamente
-        archivos_subidos = st.file_uploader(
-            "**Seleccionar archivos a procesar** *",
-            type=['pdf', 'docx', 'doc', 'jpg', 'jpeg', 'png', 'txt'],
-            accept_multiple_files=True,
-            help="Selecciona todos los archivos que quieres procesar",
-            key="archivos_subidos_tab7"
-        )
+        # Configuración en dos columnas
+        col_config1, col_config2 = st.columns(2)
         
-        patron_busqueda = st.selectbox(
-            "**Patrón de búsqueda de CI** *",
-            ["CI al inicio", "CI en cualquier parte", "CI específico en nombre"],
-            help="Cómo buscar el CI en los nombres de archivo",
-            key="patron_busqueda_tab7"
-        )
-    
-    with col_config2:
-        st.markdown("#### 📊 Configuración de Procesamiento")
-        max_documentos_local = st.number_input(
-            "**Límite de documentos**",
-            min_value=10,
-            max_value=100,
-            value=50,
-            step=10,
-            help="Máximo número de documentos a procesar",
-            key="max_documentos_local_tab7"
-        )
-        
-        sobrescribir_existentes_local = st.checkbox(
-            "**Sobrescribir documentos existentes**",
-            value=False,
-            help="Reemplazar documentos que ya existen en la base de datos",
-            key="sobrescribir_existentes_local_tab7"
-        )
-    
-    # Sección para CSV de metadatos
-    st.markdown("#### 📋 Archivo CSV con Metadatos")
-    st.info("""
-    **El CSV debe contener las columnas:**
-    - `ci` (obligatorio): Número de cédula (debe coincidir con los nombres de archivo)
-    - `nombre` (obligatorio): Nombre completo
-    - `titulo`: Título del documento (si no se especifica, se genera automáticamente)
-    - `categoria`: Categoría del documento
-    - `autor`: Autor del documento  
-    - `version`: Versión del documento
-    - `etiquetas`: Tags separados por comas
-    - `prioridad`: Baja, Media, Alta
-    
-    **Ejemplos de nombres de archivo:**
-    - `12345678_contrato.pdf` (CI al inicio)
-    - `contrato_12345678.pdf` (CI en cualquier parte)
-    - `CI_12345678_identificacion.jpg` (CI específico)
-    """)
-    
-    archivo_csv_local = st.file_uploader(
-        "**Subir CSV con metadatos** *",
-        type=['csv'],
-        help="CSV con información de CI, nombres, títulos, etc.",
-        key="archivo_csv_local_tab7"
-    )
-
-
-def procesar_carga_local_upload(db, archivos_subidos, df_metadatos, patron_busqueda, sobrescribir_existentes):
-    """
-    Función principal para procesar carga masiva local con archivos subidos
-    """
-    try:
-        # Configuración
-        config = {
-            'lote_id': f"local_upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        }
-        
-        # Contadores
-        archivos_procesados = 0
-        documentos_exitosos = 0
-        documentos_fallidos = 0
-        documentos_duplicados = 0
-        documentos_sin_ci = 0
-        cis_encontrados = set()
-        
-        st.info(f"🔍 Procesando {len(archivos_subidos)} archivos subidos...")
-        
-        # Crear mapeo CI -> metadatos para búsqueda rápida
-        mapeo_metadatos = {}
-        for _, fila in df_metadatos.iterrows():
-            ci_str = str(fila['ci']).strip()
-            mapeo_metadatos[ci_str] = fila.to_dict()
-        
-        # Configurar interfaz de progreso
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        # Procesar archivos
-        documentos_a_insertar = []
-        
-        for archivo in archivos_subidos:
-            # Extraer CI del nombre del archivo
-            ci_extraido = extraer_ci_desde_nombre(archivo.name, patron_busqueda)
+        with col_config1:
+            st.markdown("#### 📁 Configuración de Carpetas")
+            ruta_base_local = st.text_input(
+                "**Ruta de carpeta de archivos** *",
+                value="C:\\subir_archivos\\",
+                placeholder="C:\\subir_archivos\\",
+                help="Ruta donde están todos los archivos (se buscará recursivamente)",
+                key="ruta_base_local_tab7"
+            )
             
-            if not ci_extraido:
-                documentos_sin_ci += 1
-                continue
+            tipos_archivo_local = st.multiselect(
+                "**Tipos de archivo a procesar** *",
+                ['.pdf', '.docx', '.doc', '.jpg', '.jpeg', '.png', '.txt'],
+                default=['.pdf', '.docx', '.doc'],
+                help="Selecciona los tipos de archivo a incluir",
+                key="tipos_archivo_local_tab7"
+            )
             
-            # Buscar metadatos para este CI
-            metadatos_ci = mapeo_metadatos.get(ci_extraido)
-            if not metadatos_ci:
-                documentos_sin_ci += 1
-                continue
-            
-            cis_encontrados.add(ci_extraido)
-            
-            # Verificar duplicados si no se permite sobrescribir
-            if not sobrescribir_existentes:
-                existe = db.documentos.count_documents({
-                    "nombre_archivo": archivo.name,
-                    "ci": ci_extraido
-                }) > 0
-                
-                if existe:
-                    documentos_duplicados += 1
-                    continue
-            
-            # Procesar archivo
-            documento, error = procesar_archivo_local_upload(archivo, ci_extraido, metadatos_ci, config)
-            
-            if error:
-                documentos_fallidos += 1
-                st.error(error)
-            else:
-                documentos_a_insertar.append(documento)
-            
-            archivos_procesados += 1
-            
-            # Actualizar progreso
-            progreso = archivos_procesados / len(archivos_subidos)
-            progress_bar.progress(progreso)
-            status_text.text(
-                f"📊 Progreso: {archivos_procesados}/{len(archivos_subidos)} | "
-                f"✅ Listos: {len(documentos_a_insertar)} | "
-                f"❌ Fallidos: {documentos_fallidos} | "
-                f"⚡ Duplicados: {documentos_duplicados} | "
-                f"🔍 Sin CI: {documentos_sin_ci}"
+            patron_busqueda = st.selectbox(
+                "**Patrón de búsqueda de CI** *",
+                ["CI al inicio", "CI en cualquier parte", "CI específico en nombre"],
+                help="Cómo buscar el CI en los nombres de archivo",
+                key="patron_busqueda_tab7"
             )
         
-        # Insertar todos los documentos en MongoDB
-        if documentos_a_insertar:
+        with col_config2:
+            st.markdown("#### 📊 Configuración de Procesamiento")
+            max_documentos_local = st.number_input(
+                "**Límite de documentos**",
+                min_value=100,
+                max_value=10000,
+                value=3000,
+                step=100,
+                help="Máximo número de documentos a procesar",
+                key="max_documentos_local_tab7"
+            )
+            
+            tamaño_lote_local = st.slider(
+                "**Tamaño del lote**",
+                min_value=50,
+                max_value=500,
+                value=100,
+                help="Documentos procesados por lote (mejora performance)",
+                key="tamaño_lote_local_tab7"
+            )
+            
+            sobrescribir_existentes_local = st.checkbox(
+                "**Sobrescribir documentos existentes**",
+                value=False,
+                help="Reemplazar documentos que ya existen en la base de datos",
+                key="sobrescribir_existentes_local_tab7"
+            )
+        
+        # Sección para CSV de metadatos
+        st.markdown("#### 📋 Archivo CSV con Metadatos")
+        st.info("""
+        **El CSV debe contener las columnas:**
+        - `ci` (obligatorio): Número de cédula (debe coincidir con los nombres de archivo)
+        - `nombre` (obligatorio): Nombre completo
+        - `titulo`: Título del documento (si no se especifica, se genera automáticamente)
+        - `categoria`: Categoría del documento
+        - `autor`: Autor del documento  
+        - `version`: Versión del documento
+        - `etiquetas`: Tags separados por comas
+        - `prioridad`: Baja, Media, Alta
+        
+        **Ejemplos de nombres de archivo:**
+        - `12345678_contrato.pdf` (CI al inicio)
+        - `contrato_12345678.pdf` (CI en cualquier parte)
+        - `CI_12345678_identificacion.jpg` (CI específico)
+        """)
+        
+        archivo_csv_local = st.file_uploader(
+            "**Subir CSV con metadatos** *",
+            type=['csv'],
+            help="CSV con información de CI, nombres, títulos, etc.",
+            key="archivo_csv_local_tab7"
+        )
+        
+        # Previsualización del CSV - SOLO MOSTRAR, NO PROCESAR
+        if archivo_csv_local:
             try:
-                result = db.documentos.insert_many(documentos_a_insertar, ordered=False)
-                documentos_exitosos += len(result.inserted_ids)
-            except Exception as e:
-                documentos_fallidos += len(documentos_a_insertar)
-                st.error(f"Error insertando documentos: {str(e)}")
-        
-        # Mostrar resultados finales
-        progress_bar.progress(1.0)
-        status_text.text("✅ Procesamiento completado!")
-        
-        # Resultados
-        st.markdown("### 📈 Resultados Finales - Carga Local")
-        
-        # Métricas principales
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Archivos Subidos", len(archivos_subidos))
-        with col2:
-            st.metric("Procesados Exitosos", documentos_exitosos)
-        with col3:
-            st.metric("Fallidos/Sin CI", documentos_fallidos + documentos_sin_ci)
-        with col4:
-            st.metric("CIs Encontrados", len(cis_encontrados))
-        
-        if documentos_exitosos > 0:
-            st.success(f"🎉 Carga local completada por {st.session_state.mongo_username}! {documentos_exitosos} documentos procesados exitosamente.")
-            st.balloons()
-            
-            # Mostrar detalles adicionales
-            with st.expander("📋 Detalles del procesamiento", expanded=True):
-                col_d1, col_d2, col_d3 = st.columns(3)
-                with col_d1:
-                    st.metric("Documentos duplicados", documentos_duplicados)
-                with col_d2:
-                    st.metric("Archivos sin CI", documentos_sin_ci)
-                with col_d3:
-                    st.metric("Fallidos en procesamiento", documentos_fallidos)
-            
-            # Actualizar estadísticas
-            st.session_state.last_delete_time = datetime.now().timestamp()
-        
-        if documentos_duplicados > 0:
-            st.info(f"💡 {documentos_duplicados} documentos no se procesaron por duplicados. "
-                   "Marca 'Sobrescribir documentos existentes' para forzar el reprocesamiento.")
-        
-        if documentos_sin_ci > 0:
-            st.warning(f"⚠️ {documentos_sin_ci} archivos no se procesaron porque no se pudo extraer el CI o no había metadatos. "
-                      "Verifica que los nombres de archivo contengan el CI y que el CSV tenga los metadatos correspondientes.")
-            
-    except Exception as e:
-        st.error(f"❌ Error en el procesamiento local: {str(e)}")
-
-        
-    
-    # Previsualización del CSV - SOLO MOSTRAR, NO PROCESAR
-    if archivo_csv_local:
-        try:
-            # Solo cargar y mostrar preview, no procesar todavía
-            content = archivo_csv_local.getvalue().decode('utf-8')
-            lines = content.split('\n')
-            
-            st.success(f"✅ Archivo CSV cargado: {len(lines)} líneas detectadas")
-            
-            # Mostrar vista previa simple sin consumir el archivo
-            with st.expander("📊 Vista previa del CSV (primeras 5 líneas)", expanded=True):
-                st.write("**Contenido del CSV:**")
-                for i, line in enumerate(lines[:6]):  # Mostrar header + 5 filas
-                    st.text(f"Línea {i+1}: {line}")
-            
-            # Botón para cargar y validar el CSV
-            if st.button("🔍 Validar estructura del CSV", key="validar_csv_tab7"):
-                with st.spinner("Validando CSV..."):
-                    # Resetear el archivo para leerlo desde el inicio
-                    archivo_csv_local.seek(0)
-                    df_metadatos_local, error_csv = cargar_y_validar_csv(archivo_csv_local, "carga local")
-                    
-                    if error_csv:
-                        st.error(f"❌ Error en el CSV: {error_csv}")
-                    else:
-                        st.session_state.df_metadatos_local = df_metadatos_local
-                        st.success(f"✅ CSV validado correctamente: {len(df_metadatos_local)} registros de {df_metadatos_local['ci'].nunique()} CIs diferentes")
+                # Solo cargar y mostrar preview, no procesar todavía
+                content = archivo_csv_local.getvalue().decode('utf-8')
+                lines = content.split('\n')
+                
+                st.success(f"✅ Archivo CSV cargado: {len(lines)} líneas detectadas")
+                
+                # Mostrar vista previa simple sin consumir el archivo
+                with st.expander("📊 Vista previa del CSV (primeras 5 líneas)", expanded=True):
+                    st.write("**Contenido del CSV:**")
+                    for i, line in enumerate(lines[:6]):  # Mostrar header + 5 filas
+                        st.text(f"Línea {i+1}: {line}")
+                
+                # Botón para cargar y validar el CSV
+                if st.button("🔍 Validar estructura del CSV", key="validar_csv_tab7"):
+                    with st.spinner("Validando CSV..."):
+                        # Resetear el archivo para leerlo desde el inicio
+                        archivo_csv_local.seek(0)
+                        df_metadatos_local, error_csv = cargar_y_validar_csv(archivo_csv_local, "carga local")
                         
-                        # Mostrar resumen del CSV validado
-                        with st.expander("📋 Resumen del CSV validado", expanded=True):
-                            st.dataframe(df_metadatos_local.head(), use_container_width=True)
-                            st.write(f"**Total de registros:** {len(df_metadatos_local)}")
-                            st.write(f"**CIs únicos:** {df_metadatos_local['ci'].nunique()}")
-                            st.write(f"**Columnas:** {list(df_metadatos_local.columns)}")
+                        if error_csv:
+                            st.error(f"❌ Error en el CSV: {error_csv}")
+                        else:
+                            st.session_state.df_metadatos_local = df_metadatos_local
+                            st.success(f"✅ CSV validado correctamente: {len(df_metadatos_local)} registros de {df_metadatos_local['ci'].nunique()} CIs diferentes")
+                            
+                            # Mostrar resumen del CSV validado
+                            with st.expander("📋 Resumen del CSV validado", expanded=True):
+                                st.dataframe(df_metadatos_local.head(), use_container_width=True)
+                                st.write(f"**Total de registros:** {len(df_metadatos_local)}")
+                                st.write(f"**CIs únicos:** {df_metadatos_local['ci'].nunique()}")
+                                st.write(f"**Columnas:** {list(df_metadatos_local.columns)}")
+            
+            except Exception as e:
+                st.error(f"❌ Error al leer el CSV: {str(e)}")
         
-        except Exception as e:
-            st.error(f"❌ Error al leer el CSV: {str(e)}")
-    
-    # Mostrar archivos subidos
-    if archivos_subidos:
-        st.success(f"✅ {len(archivos_subidos)} archivo(s) listos para procesar")
-        with st.expander("📁 Archivos cargados", expanded=True):
-            for i, archivo in enumerate(archivos_subidos[:10]):  # Mostrar solo los primeros 10
-                st.write(f"{i+1}. {archivo.name} ({archivo.size} bytes)")
-            if len(archivos_subidos) > 10:
-                st.info(f"... y {len(archivos_subidos) - 10} archivos más")
-    
-    # Botón de procesamiento - USAR EL DATAFRAME DEL SESSION_STATE
-    st.markdown("#### ⚡ Procesamiento Local")
-    
-    if st.button("🚀 Iniciar Carga Local", type="primary", use_container_width=True, key="btn_carga_local_tab7"):
-        if st.session_state.df_metadatos_local is None:
-            st.error("❌ Primero debes validar el CSV usando el botón 'Validar estructura del CSV'")
-        elif not archivos_subidos:
-            st.error("❌ Debes subir al menos un archivo para procesar")
-        else:
-            # Usar el DataFrame ya validado del session_state
-            df_metadatos_local = st.session_state.df_metadatos_local
-            
-            # Limitar el número de archivos si es necesario
-            archivos_a_procesar = archivos_subidos[:max_documentos_local]
-            
-            # Mostrar resumen antes de procesar
-            st.info(f"📋 **Resumen a procesar:** {len(archivos_a_procesar)} archivos con {len(df_metadatos_local)} registros de {df_metadatos_local['ci'].nunique()} CIs diferentes")
-            
-            # Procesar carga local
-            with st.spinner("🔄 Iniciando procesamiento local..."):
-                resultado = procesar_carga_local_upload(
-                    db=db,
-                    archivos_subidos=archivos_a_procesar,
-                    df_metadatos=df_metadatos_local,
-                    patron_busqueda=patron_busqueda,
-                    sobrescribir_existentes=sobrescribir_existentes_local
-                )
+        # Botón de procesamiento - USAR EL DATAFRAME DEL SESSION_STATE
+        st.markdown("#### ⚡ Procesamiento Local")
+        
+        if st.button("🚀 Iniciar Carga Local", type="primary", use_container_width=True, key="btn_carga_local_tab7"):
+            if st.session_state.df_metadatos_local is None:
+                st.error("❌ Primero debes validar el CSV usando el botón 'Validar estructura del CSV'")
+            elif not ruta_base_local:
+                st.error("❌ Debes especificar la ruta de la carpeta de archivos")
+            elif not tipos_archivo_local:
+                st.error("❌ Debes seleccionar al menos un tipo de archivo")
+            else:
+                # Usar el DataFrame ya validado del session_state
+                df_metadatos_local = st.session_state.df_metadatos_local
+                
+                # Verificar que la ruta existe
+                ruta_path = Path(ruta_base_local)
+                if not ruta_path.exists():
+                    st.error(f"❌ La ruta especificada no existe: {ruta_base_local}")
+                else:
+                    # Mostrar resumen antes de procesar
+                    st.info(f"📋 **Resumen a procesar:** {len(df_metadatos_local)} registros de {df_metadatos_local['ci'].nunique()} CIs diferentes")
+                    
+                    # Procesar carga local
+                    with st.spinner("🔄 Iniciando procesamiento local..."):
+                        resultado = procesar_carga_local(
+                            db=db,
+                            ruta_base=ruta_base_local,
+                            df_metadatos=df_metadatos_local,
+                            tipos_archivo=tipos_archivo_local,
+                            max_documentos=max_documentos_local,
+                            tamaño_lote=tamaño_lote_local,
+                            patron_busqueda=patron_busqueda,
+                            sobrescribir_existentes=sobrescribir_existentes_local
+                        )
+
 else:
     st.info("👈 Configura la conexión a MongoDB en la barra lateral para comenzar")
 
@@ -1881,6 +1753,3 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
-
-
-
