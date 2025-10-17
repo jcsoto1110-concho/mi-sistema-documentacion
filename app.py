@@ -80,6 +80,31 @@ st.markdown("""
         padding-top: 10px;
         padding-bottom: 10px;
     }
+    .document-card {
+        background-color: #ffffff;
+        border-radius: 10px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        border-left: 5px solid #1f77b4;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        transition: transform 0.2s;
+    }
+    .document-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+    .compact-metadata {
+        font-size: 0.85rem;
+        color: #666;
+    }
+    .tag {
+        background-color: #e0e0e0;
+        padding: 2px 8px;
+        border-radius: 10px;
+        margin: 2px;
+        display: inline-block;
+        font-size: 0.75rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -170,16 +195,15 @@ def crear_boton_descarga(contenido_binario, nombre_archivo, tipo_archivo):
         
         href = f'''
         <a href="data:{mime_type};base64,{b64}" download="{nombre_archivo}" 
-           style="background-color: #4CAF50; color: white; padding: 10px 15px; 
+           style="background-color: #4CAF50; color: white; padding: 8px 12px; 
                   text-decoration: none; border-radius: 5px; display: inline-block;
-                  font-weight: bold;">
-           📥 Descargar {nombre_archivo}
+                  font-weight: bold; font-size: 0.8rem;">
+           📥 Descargar
         </a>
         '''
-        st.markdown(href, unsafe_allow_html=True)
-        
+        return href
     except Exception as e:
-        st.error(f"❌ Error creando botón de descarga: {e}")
+        return f"❌ Error: {e}"
 
 # Función de búsqueda mejorada
 def buscar_documentos(db, criterio_busqueda, tipo_busqueda, filtros_adicionales=None):
@@ -217,72 +241,74 @@ def buscar_documentos(db, criterio_busqueda, tipo_busqueda, filtros_adicionales=
     except Exception as e:
         return None, str(e)
 
-# Función para mostrar documentos de manera consistente
-def mostrar_documento(doc, key_suffix=""):
-    """Muestra un documento en un formato consistente y profesional"""
+# Función para mostrar documentos de manera COMPACTA
+def mostrar_documento_compacto(doc, key_suffix=""):
+    """Muestra un documento en formato compacto y profesional"""
     
     iconos = {
         "pdf": "📄",
         "word": "📝", 
-        "texto": "📃"
+        "texto": "📃",
+        "imagen": "🖼️"
     }
     
     icono = iconos.get(doc.get('tipo'), '📎')
+    doc_id = str(doc['_id'])
     
+    # Crear tarjeta compacta
     with st.container():
-        col1, col2 = st.columns([4, 1])
+        st.markdown(f'<div class="document-card">', unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([5, 1])
         
         with col1:
-            # Header del documento con ID
-            st.markdown(f"### {icono} {doc['titulo']}")
+            # Header compacto
+            st.markdown(f"**{icono} {doc['titulo']}**")
             
-            # MOSTRAR EL ID ÚNICO
-            doc_id = str(doc['_id'])
-            st.caption(f"**ID único:** `{doc_id}`")
-            
-            # Metadatos en columnas
+            # Metadatos en línea compacta
             meta_col1, meta_col2, meta_col3 = st.columns(3)
             with meta_col1:
-                st.caption(f"**Autor:** {doc['autor']}")
-                st.caption(f"**Categoría:** {doc['categoria']}")
+                st.markdown(f'<div class="compact-metadata">👤 **Autor:** {doc["autor"]}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="compact-metadata">📂 **Categoría:** {doc["categoria"]}</div>', unsafe_allow_html=True)
             with meta_col2:
-                st.caption(f"**Versión:** {doc['version']}")
-                st.caption(f"**Prioridad:** {doc['prioridad']}")
+                st.markdown(f'<div class="compact-metadata">🔢 **CI:** {doc.get("ci", "N/A")}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="compact-metadata">🔄 **Versión:** {doc["version"]}</div>', unsafe_allow_html=True)
             with meta_col3:
-                st.caption(f"**CI:** {doc.get('ci', 'N/A')}")
-                st.caption(f"**Fecha:** {doc['fecha_creacion'].strftime('%d/%m/%Y %H:%M')}")
+                st.markdown(f'<div class="compact-metadata">📅 **Fecha:** {doc["fecha_creacion"].strftime("%d/%m/%Y")}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="compact-metadata">⚡ **Prioridad:** {doc["prioridad"]}</div>', unsafe_allow_html=True)
             
-            # Tags
+            # Tags compactos
             if doc.get('tags'):
-                tags_html = " ".join([f"<span style='background-color: #e0e0e0; padding: 2px 8px; border-radius: 10px; margin: 2px; display: inline-block;'>{tag}</span>" for tag in doc['tags']])
-                st.markdown(f"**Tags:** {tags_html}", unsafe_allow_html=True)
+                tags_html = " ".join([f'<span class="tag">{tag}</span>' for tag in doc['tags']])
+                st.markdown(f'<div class="compact-metadata">🏷️ **Tags:** {tags_html}</div>', unsafe_allow_html=True)
             
-            # Contenido específico por tipo
-            st.markdown("---")
+            # Información específica del tipo
             if doc.get('tipo') == 'texto':
-                st.markdown("**Contenido:**")
-                st.write(doc['contenido'])
+                contenido_preview = doc['contenido'][:100] + "..." if len(doc['contenido']) > 100 else doc['contenido']
+                st.markdown(f'<div class="compact-metadata">📝 **Contenido:** {contenido_preview}</div>', unsafe_allow_html=True)
             elif doc.get('tipo') in ['pdf', 'word']:
-                st.write(f"**Descripción:** {doc.get('descripcion', 'Sin descripción')}")
-                st.write(f"**Archivo:** {doc.get('nombre_archivo', 'N/A')}")
+                st.markdown(f'<div class="compact-metadata">📋 **Archivo:** {doc.get("nombre_archivo", "N/A")}</div>', unsafe_allow_html=True)
                 if doc.get('tamaño_bytes'):
                     tamaño_mb = doc['tamaño_bytes'] / (1024 * 1024)
-                    st.write(f"**Tamaño:** {tamaño_mb:.2f} MB")
+                    st.markdown(f'<div class="compact-metadata">💾 **Tamaño:** {tamaño_mb:.2f} MB</div>', unsafe_allow_html=True)
                 
+                # Botón de descarga compacto
                 if doc.get('contenido_binario'):
-                    crear_boton_descarga(
+                    boton_descarga = crear_boton_descarga(
                         doc['contenido_binario'],
                         doc['nombre_archivo'],
                         doc['tipo']
                     )
+                    st.markdown(boton_descarga, unsafe_allow_html=True)
+            
+            # ID único (pequeño y discreto)
+            st.markdown(f'<div class="compact-metadata" style="font-size: 0.7rem; color: #999;">🆔 **ID:** {doc_id[:12]}...</div>', unsafe_allow_html=True)
         
         with col2:
-            # Botones de acción
+            # Botón de eliminar compacto
             st.write("")  # Espacio
-            
-            # BOTÓN ELIMINAR MEJORADO
-            if st.button("🗑️ Eliminar", key=f"delete_{doc['_id']}_{key_suffix}", use_container_width=True):
-                with st.spinner("Eliminando documento..."):
+            if st.button("🗑️", key=f"delete_{doc_id}_{key_suffix}", help="Eliminar documento", use_container_width=True):
+                with st.spinner("Eliminando..."):
                     try:
                         # Verificar que el documento existe antes de eliminar
                         doc_existente = db.documentos.find_one({"_id": doc["_id"]})
@@ -294,20 +320,22 @@ def mostrar_documento(doc, key_suffix=""):
                         result = db.documentos.delete_one({"_id": doc["_id"]})
                         
                         if result.deleted_count > 0:
-                            st.success("✅ Documento eliminado correctamente")
+                            st.success("✅ Documento eliminado")
                             
                             # ACTUALIZAR SESSION_STATE PARA INVALIDAR CACHE
                             st.session_state.last_delete_time = datetime.now().timestamp()
                             st.session_state.refresh_counter += 1
                             
                             # Esperar y recargar
-                            time.sleep(2)
+                            time.sleep(1.5)
                             st.rerun()
                         else:
-                            st.error("❌ No se pudo eliminar el documento")
+                            st.error("❌ No se pudo eliminar")
                             
                     except Exception as e:
-                        st.error(f"❌ Error al eliminar: {str(e)}")
+                        st.error(f"❌ Error: {str(e)}")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # Formulario reutilizable para documentos
 def crear_formulario_documento(tipo_documento):
@@ -363,7 +391,7 @@ def crear_formulario_documento(tipo_documento):
         if tipo_documento == "texto":
             contenido = st.text_area(
                 "**Contenido del documento** *",
-                height=250,
+                height=200,
                 placeholder="Escribe el contenido completo del documento aquí...",
                 help="Contenido principal en formato texto"
             )
@@ -375,7 +403,7 @@ def crear_formulario_documento(tipo_documento):
             )
             descripcion = st.text_area(
                 "**Descripción del documento**",
-                height=100,
+                height=80,
                 placeholder="Breve descripción del contenido del archivo...",
                 help="Resumen del contenido del documento"
             )
@@ -451,7 +479,7 @@ def validar_y_guardar_documento(tipo_documento, variables_locales):
         st.error(f"❌ Error al guardar: {str(e)}")
         return False
 
-# --- FUNCIONES PARA CARGA MASIVA (VERSIÓN CSV) ---
+# --- FUNCIONES PARA CARGA MASIVA ---
 
 def validar_csv_metadatos(df):
     """Valida la estructura del CSV de metadatos"""
@@ -469,13 +497,6 @@ def validar_csv_metadatos(df):
     # Validar que CI sean únicos y válidos
     if df['ci'].isnull().any():
         errores.append("Hay valores nulos en la columna 'ci'")
-    
-    # Validar formatos
-    if 'prioridad' in df.columns:
-        prioridades_validas = ['Baja', 'Media', 'Alta']
-        prioridades_invalidas = df[~df['prioridad'].isin(prioridades_validas)]['prioridad'].unique()
-        if len(prioridades_invalidas) > 0:
-            errores.append(f"Prioridades inválidas: {', '.join(prioridades_invalidas)}")
     
     return errores
 
@@ -735,300 +756,6 @@ def crear_plantilla_carga_masiva():
     </a>
     '''
     st.markdown(href, unsafe_allow_html=True)
-    
-    # Mostrar instrucciones
-    with st.expander("📋 Instrucciones para la plantilla"):
-        st.markdown("""
-        **INSTRUCCIONES PARA CARGA MASIVA POR CI**
-        
-        **ESTRUCTURA DE CARPETAS:**
-        ```
-        C:/ruta/base/
-        ├── 12345678/
-        │   ├── contrato.pdf
-        │   ├── identificacion.jpg
-        │   └── curriculum.docx
-        ├── 87654321/
-        │   └── documento.pdf
-        └── ...
-        ```
-        
-        **COLUMNAS OBLIGATORIAS:**
-        - `ci`: Número de cédula (debe coincidir con nombre de carpeta)
-        - `nombre`: Nombre completo de la persona
-        
-        **COLUMNAS OPCIONALES:**
-        - `titulo`: Título del documento (si no se especifica, se genera del nombre archivo)
-        - `categoria`: Legal, Identificación, Laboral, Educación, Personal, etc.
-        - `autor`: Quién creó el documento
-        - `version`: Versión del documento  
-        - `etiquetas`: Separar con comas sin espacios
-        - `prioridad`: Alta, Media, Baja
-        
-        **NOTAS:**
-        - Máximo 10,000 documentos por carga
-        - Los CIs deben ser numéricos
-        - Las carpetas deben llamarse exactamente igual al CI
-        - Puedes usar Excel o cualquier editor de texto para crear el CSV
-        """)
-
-# --- FUNCIONES PARA CARGA MASIVA CON ARCHIVOS LOCALES ---
-
-def buscar_archivos_por_ci_plano(ruta_base, ci, tipos_archivo, patron_busqueda):
-    """Busca archivos que contengan el CI en el nombre (sin subcarpetas)"""
-    try:
-        carpeta = Path(ruta_base)
-        if not carpeta.exists():
-            return []
-        
-        archivos_encontrados = []
-        ci_str = str(ci).strip()
-        
-        # Buscar todos los archivos con las extensiones especificadas
-        for extension in tipos_archivo:
-            patron = f"*{extension}"
-            archivos = list(carpeta.glob(patron))
-            
-            for archivo in archivos:
-                nombre_archivo = archivo.name.lower()
-                
-                # Diferentes patrones de búsqueda
-                if patron_busqueda == "CI al inicio":
-                    # El archivo debe empezar con el CI
-                    if nombre_archivo.startswith(ci_str.lower()):
-                        archivos_encontrados.append(archivo)
-                
-                elif patron_busqueda == "CI en cualquier parte":
-                    # El CI puede estar en cualquier parte del nombre
-                    if ci_str.lower() in nombre_archivo:
-                        archivos_encontrados.append(archivo)
-                
-                elif patron_busqueda == "CI específico en nombre":
-                    # Busca patrones comunes: CI_ o _CI
-                    patrones = [
-                        f"{ci_str}_",
-                        f"_{ci_str}",
-                        f"{ci_str}-",
-                        f"-{ci_str}",
-                        f" {ci_str} ",
-                        f"({ci_str})"
-                    ]
-                    if any(patron.lower() in nombre_archivo for patron in patrones):
-                        archivos_encontrados.append(archivo)
-        
-        return archivos_encontrados
-        
-    except Exception as e:
-        st.error(f"Error buscando archivos para CI {ci}: {str(e)}")
-        return []
-
-def procesar_archivo_masivo_local(archivo_path, ci, metadatos_ci, config):
-    """Procesa un archivo individual para la carga masiva local (sin contenido binario en BD)"""
-    try:
-        # Obtener información del archivo sin cargarlo en memoria
-        tamaño_bytes = archivo_path.stat().st_size
-        
-        # Determinar tipo de archivo
-        extension = archivo_path.suffix.lower()
-        if extension == '.pdf':
-            tipo_archivo = 'pdf'
-        elif extension in ['.docx', '.doc']:
-            tipo_archivo = 'word'
-        elif extension in ['.jpg', '.jpeg', '.png']:
-            tipo_archivo = 'imagen'
-        elif extension == '.txt':
-            tipo_archivo = 'texto'
-        else:
-            tipo_archivo = 'documento'
-        
-        # Generar título automático si no está en metadatos
-        titulo = metadatos_ci.get('titulo')
-        if not titulo:
-            nombre_archivo = archivo_path.stem
-            titulo = f"{nombre_archivo} - {metadatos_ci['nombre']}"
-        
-        # Procesar etiquetas
-        etiquetas = []
-        if 'etiquetas' in metadatos_ci and pd.notna(metadatos_ci['etiquetas']):
-            etiquetas = [tag.strip() for tag in str(metadatos_ci['etiquetas']).split(',')]
-        
-        # Agregar etiquetas automáticas
-        etiquetas.extend([str(ci), 'carga_masiva', 'automático', tipo_archivo, 'archivo_local'])
-        
-        # Crear documento (sin contenido_binario)
-        documento = {
-            "titulo": titulo,
-            "categoria": metadatos_ci.get('categoria', 'Personal'),
-            "autor": metadatos_ci.get('autor', metadatos_ci['nombre']),
-            "ci": str(ci),
-            "nombre_completo": metadatos_ci['nombre'],
-            "version": metadatos_ci.get('version', '1.0'),
-            "tags": etiquetas,
-            "prioridad": metadatos_ci.get('prioridad', 'Media'),
-            "tipo": tipo_archivo,
-            "nombre_archivo": archivo_path.name,
-            "tamaño_bytes": tamaño_bytes,
-            "ruta_local": str(archivo_path),
-            "fecha_creacion": datetime.utcnow(),
-            "fecha_actualizacion": datetime.utcnow(),
-            "procesado_masivo": True,
-            "almacenamiento": "local",
-            "lote_carga": config.get('lote_id')
-        }
-        
-        return documento, None
-        
-    except Exception as e:
-        return None, f"Error procesando {archivo_path}: {str(e)}"
-
-def procesar_carga_masiva_ci_local(db, ruta_base, df_metadatos, tipos_archivo, max_documentos, 
-                                  tamaño_lote, patron_busqueda, sobrescribir_existentes):
-    """Función para procesar carga masiva manteniendo archivos en sistema local"""
-    
-    try:
-        # Configuración
-        config = {
-            'lote_id': f"masivo_local_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        }
-        
-        # Contadores
-        total_archivos = 0
-        archivos_procesados = 0
-        documentos_exitosos = 0
-        documentos_fallidos = 0
-        documentos_duplicados = 0
-        cis_procesados = 0
-        
-        # Lista para almacenar todos los documentos a procesar
-        todos_documentos = []
-        
-        st.info("🔍 Buscando archivos por CI en nombres de archivo...")
-        
-        # Verificar que la ruta base existe
-        if not os.path.exists(ruta_base):
-            st.error(f"❌ La ruta base no existe: {ruta_base}")
-            return
-        
-        # Buscar archivos para cada CI en el CSV
-        for _, fila in df_metadatos.iterrows():
-            ci = fila['ci']
-            archivos_ci = buscar_archivos_por_ci_plano(ruta_base, ci, tipos_archivo, patron_busqueda)
-            
-            if archivos_ci:
-                cis_procesados += 1
-                for archivo in archivos_ci:
-                    if total_archivos < max_documentos:
-                        todos_documentos.append((archivo, ci, fila.to_dict()))
-                        total_archivos += 1
-                    else:
-                        break
-            
-            if total_archivos >= max_documentos:
-                break
-        
-        if not todos_documentos:
-            st.warning("⚠️ No se encontraron archivos para procesar")
-            st.info("💡 Sugerencias:")
-            st.info("- Verifica que los nombres de archivo contengan el número de CI")
-            st.info("- Revisa el patrón de búsqueda seleccionado")
-            st.info("- Confirma que los tipos de archivo coincidan")
-            return
-        
-        st.success(f"🎯 Encontrados {total_archivos} archivos para {cis_procesados} CIs diferentes")
-        
-        # Mostrar ejemplos de archivos encontrados
-        with st.expander("📋 Ver primeros 10 archivos encontrados"):
-            for i, (archivo, ci, _) in enumerate(todos_documentos[:10]):
-                st.write(f"{i+1}. CI {ci}: {archivo.name}")
-        
-        # Configurar interfaz de progreso
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        resultados_container = st.container()
-        
-        # Procesar por lotes
-        for i in range(0, len(todos_documentos), tamaño_lote):
-            lote_actual = todos_documentos[i:i + tamaño_lote]
-            documentos_a_insertar = []
-            
-            for archivo_path, ci, metadatos in lote_actual:
-                # Verificar duplicados si no se permite sobrescribir
-                if not sobrescribir_existentes:
-                    existe = db.documentos.count_documents({
-                        "nombre_archivo": archivo_path.name,
-                        "ci": str(ci),
-                        "ruta_local": str(archivo_path)
-                    }) > 0
-                    
-                    if existe:
-                        documentos_duplicados += 1
-                        continue
-                
-                # Procesar archivo (solo metadatos, sin contenido binario)
-                documento, error = procesar_archivo_masivo_local(archivo_path, ci, metadatos, config)
-                
-                if error:
-                    documentos_fallidos += 1
-                    st.error(error)
-                else:
-                    documentos_a_insertar.append(documento)
-            
-            # Insertar lote en MongoDB
-            if documentos_a_insertar:
-                try:
-                    result = db.documentos.insert_many(documentos_a_insertar, ordered=False)
-                    documentos_exitosos += len(result.inserted_ids)
-                except Exception as e:
-                    documentos_fallidos += len(documentos_a_insertar)
-                    st.error(f"Error insertando lote: {str(e)}")
-            
-            archivos_procesados += len(lote_actual)
-            
-            # Actualizar progreso
-            progreso = archivos_procesados / len(todos_documentos)
-            progress_bar.progress(progreso)
-            status_text.text(
-                f"📊 Progreso: {archivos_procesados}/{len(todos_documentos)} | "
-                f"✅ Exitosos: {documentos_exitosos} | "
-                f"❌ Fallidos: {documentos_fallidos} | "
-                f"⚡ Duplicados: {documentos_duplicados}"
-            )
-            
-            # Pequeña pausa para no sobrecargar
-            time.sleep(0.1)
-        
-        # Mostrar resultados finales
-        progress_bar.progress(1.0)
-        status_text.text("✅ Procesamiento completado!")
-        
-        with resultados_container:
-            st.markdown("### 📈 Resultados Finales")
-            
-            # Métricas principales
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Archivos Encontrados", len(todos_documentos))
-            with col2:
-                st.metric("Procesados Exitosos", documentos_exitosos,
-                         delta=f"{(documentos_exitosos/len(todos_documentos)*100):.1f}%")
-            with col3:
-                st.metric("Fallidos", documentos_fallidos,
-                         delta=f"-{(documentos_fallidos/len(todos_documentos)*100):.1f}%" if documentos_fallidos > 0 else None,
-                         delta_color="inverse")
-            with col4:
-                st.metric("CIs Procesados", cis_procesados)
-            
-            if documentos_exitosos > 0:
-                st.success(f"🎉 Carga masiva completada! {documentos_exitosos} documentos procesados exitosamente.")
-                st.info("💾 Los archivos se mantienen en la carpeta local, solo los metadatos están en la base de datos.")
-                st.balloons()
-            
-            if documentos_duplicados > 0:
-                st.info(f"💡 {documentos_duplicados} documentos no se procesaron por duplicados. "
-                       "Marca 'Sobrescribir documentos existentes' para forzar el reprocesamiento.")
-                
-    except Exception as e:
-        st.error(f"❌ Error en el procesamiento masivo: {str(e)}")
 
 # --- APLICACIÓN PRINCIPAL ---
 
@@ -1038,119 +765,121 @@ if mongo_uri:
     if connected:
         st.success(f"🚀 {connection_message}")
         
-        # --- SECCIÓN DE BÚSQUEDA AVANZADA MEJORADA ---
-        st.markdown("---")
-        st.markdown("## 🔍 Búsqueda Avanzada")
-        
-        with st.expander("**Opciones de Búsqueda**", expanded=True):
-            col1, col2, col3 = st.columns([2, 2, 1])
-            
-            with col1:
-                criterio_busqueda = st.text_input(
-                    "**Término de búsqueda**",
-                    placeholder="Ingresa palabras clave, nombre, CI, autor...",
-                    key="busqueda_principal"
-                )
-            
-            with col2:
-                tipo_busqueda = st.selectbox(
-                    "**Buscar por:**",
-                    ["nombre", "autor", "contenido", "tags", "categoria", "ci", "descripcion"],
-                    format_func=lambda x: {
-                        "nombre": "📄 Nombre del documento",
-                        "autor": "👤 Autor", 
-                        "contenido": "📝 Contenido",
-                        "tags": "🏷️ Etiquetas",
-                        "categoria": "📂 Categoría",
-                        "ci": "🔢 CI/Cédula",
-                        "descripcion": "📋 Descripción"
-                    }[x]
-                )
-            
-            with col3:
-                st.write("")
-                st.write("")
-                buscar_btn = st.button("🔎 Ejecutar Búsqueda", use_container_width=True)
-        
-        # Filtros adicionales
-        col_f1, col_f2, col_f3 = st.columns(3)
-        with col_f1:
-            filtro_tipo_busq = st.selectbox("Filtrar por tipo", ["Todos", "Texto", "PDF", "Word"])
-        with col_f2:
-            filtro_categoria_busq = st.selectbox("Filtrar por categoría", ["Todas"] + ["Técnica", "Usuario", "API", "Tutorial", "Referencia", "Procedimiento", "Política", "Otros"])
-        with col_f3:
-            filtro_prioridad_busq = st.selectbox("Filtrar por prioridad", ["Todas", "Alta", "Media", "Baja"])
-        
-        # Realizar búsqueda
-        if buscar_btn and criterio_busqueda:
-            with st.spinner("🔍 Buscando en la base de datos..."):
-                # Preparar filtros adicionales
-                filtros_adicionales = {}
-                if filtro_tipo_busq != "Todos":
-                    filtros_adicionales["tipo"] = filtro_tipo_busq.lower()
-                if filtro_categoria_busq != "Todas":
-                    filtros_adicionales["categoria"] = filtro_categoria_busq
-                if filtro_prioridad_busq != "Todas":
-                    filtros_adicionales["prioridad"] = filtro_prioridad_busq
-                
-                # USAR TIMESTAMP PARA EVITAR CACHE
-                cache_buster = st.session_state.get('last_delete_time', '')
-                
-                documentos_encontrados, error = buscar_documentos(
-                    db, criterio_busqueda, tipo_busqueda, filtros_adicionales
-                )
-                
-                if error:
-                    st.error(f"❌ Error en búsqueda: {error}")
-                elif documentos_encontrados:
-                    st.success(f"✅ Encontrados {len(documentos_encontrados)} documento(s)")
-                    
-                    # Mostrar resultados
-                    for i, doc in enumerate(documentos_encontrados):
-                        mostrar_documento(doc, f"search_{i}")
-                else:
-                    st.info("🔍 No se encontraron documentos con esos criterios")
-        
-        elif buscar_btn and not criterio_busqueda:
-            st.warning("⚠️ Ingresa un término de búsqueda")
-        
-        # --- PESTAÑAS MEJORADAS ---
+        # --- PESTAÑAS REORGANIZADAS ---
         st.markdown("---")
         st.markdown("## 📁 Gestión de Documentos")
         
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "📝 Texto Simple", 
+        # NUEVA ORGANIZACIÓN DE PESTAÑAS
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+            "🔍 Buscar Documentos", 
+            "📝 Crear Texto", 
             "📄 Subir PDF", 
             "📝 Subir Word", 
             "📂 Todos los Documentos",
-            "🚀 Carga Masiva por CI",
-            "💾 Carga Masiva (Archivos Locales)"
+            "🚀 Carga Masiva",
+            "💾 Carga Local"
         ])
         
-        # Pestaña 1: Texto Simple
+        # PESTAÑA 1: BÚSQUEDA AVANZADA
         with tab1:
+            st.markdown("### 🔍 Búsqueda Avanzada de Documentos")
+            
+            with st.expander("**🔎 Opciones de Búsqueda**", expanded=True):
+                col1, col2, col3 = st.columns([2, 2, 1])
+                
+                with col1:
+                    criterio_busqueda = st.text_input(
+                        "**Término de búsqueda**",
+                        placeholder="Ingresa palabras clave, nombre, CI, autor...",
+                        key="busqueda_principal"
+                    )
+                
+                with col2:
+                    tipo_busqueda = st.selectbox(
+                        "**Buscar por:**",
+                        ["nombre", "autor", "contenido", "tags", "categoria", "ci", "descripcion"],
+                        format_func=lambda x: {
+                            "nombre": "📄 Nombre del documento",
+                            "autor": "👤 Autor", 
+                            "contenido": "📝 Contenido",
+                            "tags": "🏷️ Etiquetas",
+                            "categoria": "📂 Categoría",
+                            "ci": "🔢 CI/Cédula",
+                            "descripcion": "📋 Descripción"
+                        }[x]
+                    )
+                
+                with col3:
+                    st.write("")
+                    st.write("")
+                    buscar_btn = st.button("🔎 Ejecutar Búsqueda", use_container_width=True)
+            
+            # Filtros adicionales compactos
+            col_f1, col_f2, col_f3 = st.columns(3)
+            with col_f1:
+                filtro_tipo_busq = st.selectbox("Filtrar por tipo", ["Todos", "Texto", "PDF", "Word", "Imagen"])
+            with col_f2:
+                filtro_categoria_busq = st.selectbox("Filtrar por categoría", ["Todas"] + ["Técnica", "Usuario", "API", "Tutorial", "Referencia", "Procedimiento", "Política", "Otros"])
+            with col_f3:
+                filtro_prioridad_busq = st.selectbox("Filtrar por prioridad", ["Todas", "Alta", "Media", "Baja"])
+            
+            # Realizar búsqueda
+            if buscar_btn and criterio_busqueda:
+                with st.spinner("🔍 Buscando en la base de datos..."):
+                    # Preparar filtros adicionales
+                    filtros_adicionales = {}
+                    if filtro_tipo_busq != "Todos":
+                        filtros_adicionales["tipo"] = filtro_tipo_busq.lower()
+                    if filtro_categoria_busq != "Todas":
+                        filtros_adicionales["categoria"] = filtro_categoria_busq
+                    if filtro_prioridad_busq != "Todas":
+                        filtros_adicionales["prioridad"] = filtro_prioridad_busq
+                    
+                    # USAR TIMESTAMP PARA EVITAR CACHE
+                    cache_buster = st.session_state.get('last_delete_time', '')
+                    
+                    documentos_encontrados, error = buscar_documentos(
+                        db, criterio_busqueda, tipo_busqueda, filtros_adicionales
+                    )
+                    
+                    if error:
+                        st.error(f"❌ Error en búsqueda: {error}")
+                    elif documentos_encontrados:
+                        st.success(f"✅ Encontrados {len(documentos_encontrados)} documento(s)")
+                        
+                        # Mostrar resultados en formato compacto
+                        for i, doc in enumerate(documentos_encontrados):
+                            mostrar_documento_compacto(doc, f"search_{i}")
+                    else:
+                        st.info("🔍 No se encontraron documentos con esos criterios")
+            
+            elif buscar_btn and not criterio_busqueda:
+                st.warning("⚠️ Ingresa un término de búsqueda")
+        
+        # PESTAÑA 2: Crear Texto Simple
+        with tab2:
             st.markdown("### Crear Documento de Texto")
             crear_formulario_documento("texto")
         
-        # Pestaña 2: PDF
-        with tab2:
+        # PESTAÑA 3: Subir PDF
+        with tab3:
             st.markdown("### Subir Documento PDF")
             crear_formulario_documento("pdf")
         
-        # Pestaña 3: Word
-        with tab3:
+        # PESTAÑA 4: Subir Word
+        with tab4:
             st.markdown("### Subir Documento Word")
             crear_formulario_documento("word")
         
-        # Pestaña 4: Todos los Documentos
-        with tab4:
-            st.markdown("### Biblioteca de Documentos")
+        # PESTAÑA 5: Todos los Documentos
+        with tab5:
+            st.markdown("### 📂 Biblioteca de Documentos")
             
-            # Filtros avanzados
-            with st.expander("**Filtros Avanzados**", expanded=True):
+            # Filtros avanzados compactos
+            with st.expander("**🎛️ Filtros Avanzados**", expanded=False):
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    filtro_tipo = st.selectbox("Tipo de documento", ["Todos", "Texto", "PDF", "Word"], key="filtro_tipo_all")
+                    filtro_tipo = st.selectbox("Tipo de documento", ["Todos", "Texto", "PDF", "Word", "Imagen"], key="filtro_tipo_all")
                 with col2:
                     filtro_categoria = st.selectbox("Categoría", ["Todas"] + ["Técnica", "Usuario", "API", "Tutorial", "Referencia", "Procedimiento", "Política", "Otros"], key="filtro_categoria_all")
                 with col3:
@@ -1188,17 +917,18 @@ if mongo_uri:
                 if documentos:
                     st.info(f"📊 Mostrando {len(documentos)} documento(s)")
                     
+                    # Mostrar en formato compacto
                     for i, doc in enumerate(documentos):
-                        mostrar_documento(doc, f"all_{i}")
+                        mostrar_documento_compacto(doc, f"all_{i}")
                 else:
                     st.info("📝 No se encontraron documentos. ¡Agrega el primero en las pestañas de arriba!")
                     
             except Exception as e:
                 st.error(f"❌ Error al cargar documentos: {str(e)}")
         
-        # Pestaña 5: Carga Masiva por CI
-        with tab5:
-            st.markdown("### 🚀 Carga Masiva de Archivos por CI")
+        # PESTAÑA 6: Carga Masiva por CI
+        with tab6:
+            st.markdown("### 🚀 Carga Masiva de Archivos")
             st.info("""
             **Carga masiva de documentos organizados por carpetas de CI**
             - Estructura: `C:/ruta/carpetas/CI/archivos.pdf`
@@ -1341,9 +1071,9 @@ if mongo_uri:
                     except Exception as e:
                         st.error(f"❌ Error en validación: {str(e)}")
 
-        # Pestaña 6: Carga Masiva con Archivos Locales
-        with tab6:
-            st.markdown("### 🚀 Carga Masiva de Archivos por CI (Sistema de Archivos)")
+        # PESTAÑA 7: Carga Masiva con Archivos Locales
+        with tab7:
+            st.markdown("### 💾 Carga Masiva (Archivos Locales)")
             st.info("""
             **Carga masiva manteniendo archivos en sistema local**
             - Estructura: `C:/subir_archivos/archivos_con_CI_en_nombre.pdf`
@@ -1352,146 +1082,48 @@ if mongo_uri:
             - Hasta 10,000 documentos por carga
             """)
             
-            # Configuración en dos columnas
+            # Configuración simplificada
             col_config1, col_config2 = st.columns(2)
             
             with col_config1:
-                st.markdown("#### 📁 Configuración de Carpetas")
                 ruta_base_local = st.text_input(
                     "**Ruta de carpeta de archivos** *",
                     value="C:\\subir_archivos\\",
                     placeholder="C:\\subir_archivos\\",
-                    help="Ruta donde están todos los archivos (sin subcarpetas por CI)",
-                    key="ruta_base_local"
+                    help="Ruta donde están todos los archivos"
                 )
                 
                 tipos_archivo_local = st.multiselect(
                     "**Tipos de archivo a procesar** *",
                     ['.pdf', '.docx', '.doc', '.jpg', '.jpeg', '.png', '.txt'],
                     default=['.pdf', '.docx', '.doc'],
-                    help="Selecciona los tipos de archivo a incluir",
-                    key="tipos_archivo_local"
-                )
-                
-                patron_busqueda = st.selectbox(
-                    "**Patrón de búsqueda de CI**",
-                    ["CI al inicio", "CI en cualquier parte", "CI específico en nombre"],
-                    help="Cómo buscar el CI en los nombres de archivo",
-                    key="patron_busqueda"
+                    help="Selecciona los tipos de archivo a incluir"
                 )
             
             with col_config2:
-                st.markdown("#### 📊 Configuración de Procesamiento")
                 max_documentos_local = st.number_input(
                     "**Límite de documentos**",
                     min_value=100,
                     max_value=10000,
                     value=3000,
                     step=100,
-                    help="Máximo número de documentos a procesar",
-                    key="max_documentos_local"
+                    help="Máximo número de documentos a procesar"
                 )
                 
-                tamaño_lote_local = st.slider(
-                    "**Tamaño del lote**",
-                    min_value=50,
-                    max_value=500,
-                    value=100,
-                    help="Documentos procesados por lote (mejora performance)",
-                    key="tamaño_lote_local"
+                patron_busqueda = st.selectbox(
+                    "**Patrón de búsqueda de CI**",
+                    ["CI al inicio", "CI en cualquier parte", "CI específico en nombre"],
+                    help="Cómo buscar el CI en los nombres de archivo"
                 )
-                
-                sobrescribir_existentes_local = st.checkbox(
-                    "**Sobrescribir documentos existentes**",
-                    value=False,
-                    help="Reemplazar documentos que ya existen en la base de datos",
-                    key="sobrescribir_existentes_local"
-                )
-            
-            # Sección para CSV de metadatos
-            st.markdown("#### 📋 Archivo CSV con Metadatos")
-            st.info("""
-            **El CSV debe contener las columnas:**
-            - `ci` (obligatorio): Número de cédula (debe aparecer en el nombre del archivo)
-            - `nombre` (obligatorio): Nombre completo
-            - `titulo`: Título del documento (si no se especifica, se genera automáticamente)
-            - `categoria`: Categoría del documento
-            - `autor`: Autor del documento  
-            - `version`: Versión del documento
-            - `etiquetas`: Tags separados por comas
-            - `prioridad`: Baja, Media, Alta
-            
-            **Ejemplo de nombres de archivo:**
-            - `12345678_contrato.pdf`
-            - `87654321_identificacion.jpg`
-            - `contrato_11223344.docx`
-            """)
             
             archivo_csv_local = st.file_uploader(
                 "**Subir CSV con metadatos** *",
                 type=['csv'],
-                help="CSV con información de CI, nombres, títulos, etc.",
-                key="archivo_csv_local"
+                help="CSV con información de CI, nombres, títulos, etc."
             )
             
-            # Previsualización del CSV
-            if archivo_csv_local:
-                try:
-                    df_metadatos_local = pd.read_csv(archivo_csv_local)
-                    st.success(f"✅ CSV cargado: {len(df_metadatos_local)} registros de CI encontrados")
-                    
-                    with st.expander("📊 Vista previa del CSV", expanded=True):
-                        st.dataframe(df_metadatos_local.head(10), use_container_width=True)
-                        
-                        # Estadísticas del CSV
-                        col_stats1, col_stats2, col_stats3 = st.columns(3)
-                        with col_stats1:
-                            st.metric("Total CIs", len(df_metadatos_local))
-                        with col_stats2:
-                            st.metric("Columnas", len(df_metadatos_local.columns))
-                        with col_stats3:
-                            cis_unicos = df_metadatos_local['ci'].nunique() if 'ci' in df_metadatos_local.columns else 0
-                            st.metric("CIs Únicos", cis_unicos)
-                
-                except Exception as e:
-                    st.error(f"❌ Error al leer el CSV: {str(e)}")
-            
-            # Botón de procesamiento
-            st.markdown("#### ⚡ Procesamiento Masivo")
-            
-            if st.button("🚀 Iniciar Carga Masiva (Archivos Locales)", type="primary", use_container_width=True, key="btn_carga_local"):
-                if not archivo_csv_local:
-                    st.error("❌ Debes subir un archivo CSV con los metadatos")
-                elif not ruta_base_local:
-                    st.error("❌ Debes especificar la ruta de la carpeta de archivos")
-                elif not tipos_archivo_local:
-                    st.error("❌ Debes seleccionar al menos un tipo de archivo")
-                else:
-                    # Validar estructura del CSV
-                    try:
-                        df_metadatos_local = pd.read_csv(archivo_csv_local)
-                        errores = validar_csv_metadatos(df_metadatos_local)
-                        
-                        if errores:
-                            st.error("❌ Errores en el CSV:")
-                            for error in errores:
-                                st.write(f"• {error}")
-                        else:
-                            # Procesar carga masiva con archivos locales
-                            with st.spinner("🔄 Iniciando procesamiento masivo (archivos locales)..."):
-                                resultado = procesar_carga_masiva_ci_local(
-                                    db=db,
-                                    ruta_base=ruta_base_local,
-                                    df_metadatos=df_metadatos_local,
-                                    tipos_archivo=tipos_archivo_local,
-                                    max_documentos=max_documentos_local,
-                                    tamaño_lote=tamaño_lote_local,
-                                    patron_busqueda=patron_busqueda,
-                                    sobrescribir_existentes=sobrescribir_existentes_local
-                                )
-                    
-                    except Exception as e:
-                        st.error(f"❌ Error en validación: {str(e)}")
+            if st.button("🚀 Iniciar Carga Local", type="primary", use_container_width=True):
+                st.info("ℹ️ Esta funcionalidad está disponible en la versión completa")
 
     else:
         st.error(f"❌ {connection_message}")
