@@ -1061,24 +1061,23 @@ if mongo_uri:
         with col_f3:
             filtro_prioridad_busq = st.selectbox("Filtrar por prioridad", ["Todas", "Alta", "Media", "Baja"])
         
-        # Realizar búsqueda
-    if buscar_btn and criterio_busqueda:
-    with st.spinner("🔍 Buscando en la base de datos..."):
-        # Preparar filtros adicionales
-        filtros_adicionales = {}
-        if filtro_tipo_busq != "Todos":
-            filtros_adicionales["tipo"] = filtro_tipo_busq.lower()
-        if filtro_categoria_busq != "Todas":
-            filtros_adicionales["categoria"] = filtro_categoria_busq
-        if filtro_prioridad_busq != "Todas":
-            filtros_adicionales["prioridad"] = filtro_prioridad_busq
-        
-        # AGREGAR TIMESTAMP PARA INVALIDAR CACHE
+    
+    # Realizar búsqueda
+        if buscar_btn and criterio_busqueda:
+            with st.spinner("🔍 Buscando en la base de datos..."):
+                # Preparar filtros adicionales
+                filtros_adicionales = {}
+                if filtro_tipo_busq != "Todos":
+                    filtros_adicionales["tipo"] = filtro_tipo_busq.lower()
+                if filtro_categoria_busq != "Todas":
+                    filtros_adicionales["categoria"] = filtro_categoria_busq
+                if filtro_prioridad_busq != "Todas":
+                    filtros_adicionales["prioridad"] = filtro_prioridad_busq
+                # AGREGAR TIMESTAMP PARA INVALIDAR CACHE
         cache_key = f"busqueda_{criterio_busqueda}_{tipo_busqueda}_{st.session_state.get('last_delete_time', '')}"
-        
-        documentos_encontrados, error = buscar_documentos(
-            db, criterio_busqueda, tipo_busqueda, filtros_adicionales
-        )
+                documentos_encontrados, error = buscar_documentos(
+                    db, criterio_busqueda, tipo_busqueda, filtros_adicionales
+                )
                 
                 if error:
                     st.error(f"❌ Error en búsqueda: {error}")
@@ -1484,6 +1483,7 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
