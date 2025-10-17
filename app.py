@@ -18,12 +18,13 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-# Inicializar session_state para control de cache (AGREGAR ESTO AL PRINCIPIO)
+
+# Inicializar session_state para control de cache
 if 'last_delete_time' not in st.session_state:
     st.session_state.last_delete_time = datetime.now().timestamp()
 if 'refresh_counter' not in st.session_state:
     st.session_state.refresh_counter = 0
-    
+
 # CSS personalizado para mejorar la apariencia
 st.markdown("""
 <style>
@@ -91,7 +92,7 @@ with st.sidebar:
     st.markdown("## 🔐 Configuración")
     
     # Logo o imagen de la empresa
-    st.image("https://cdn-icons-png.flaticon.com/512/2721/2721264.png", width=100)
+    st.image("https://cdn-icons-png.flaticon.com/512/2721/2721264.png", width=80)
     
     mongo_uri = st.text_input(
         "**Cadena de Conexión MongoDB**",
@@ -108,8 +109,9 @@ with st.sidebar:
         try:
             client = pymongo.MongoClient(mongo_uri)
             db = client.documentation_db
- # USAR TIMESTAMP PARA ACTUALIZAR ESTADÍSTICAS
-        cache_buster = st.session_state.get('last_delete_time', '')
+            
+            # USAR TIMESTAMP PARA ACTUALIZAR ESTADÍSTICAS
+            cache_buster = st.session_state.get('last_delete_time', '')
             
             total_docs = db.documentos.count_documents({})
             pdf_count = db.documentos.count_documents({"tipo": "pdf"})
@@ -210,7 +212,6 @@ def buscar_documentos(db, criterio_busqueda, tipo_busqueda, filtros_adicionales=
         cache_key = st.session_state.get('last_delete_time', '')
         
         documentos = list(db.documentos.find(query).sort("fecha_creacion", -1))
-        
         return documentos, None
         
     except Exception as e:
@@ -307,7 +308,7 @@ def mostrar_documento(doc, key_suffix=""):
                             
                     except Exception as e:
                         st.error(f"❌ Error al eliminar: {str(e)}")
-                        
+
 # Formulario reutilizable para documentos
 def crear_formulario_documento(tipo_documento):
     """Crea un formulario reutilizable para diferentes tipos de documentos"""
@@ -1091,9 +1092,9 @@ if mongo_uri:
                     filtros_adicionales["categoria"] = filtro_categoria_busq
                 if filtro_prioridad_busq != "Todas":
                     filtros_adicionales["prioridad"] = filtro_prioridad_busq
-     
-        # USAR TIMESTAMP PARA EVITAR CACHE
-        cache_buster = st.session_state.get('last_delete_time', '')
+                
+                # USAR TIMESTAMP PARA EVITAR CACHE
+                cache_buster = st.session_state.get('last_delete_time', '')
                 
                 documentos_encontrados, error = buscar_documentos(
                     db, criterio_busqueda, tipo_busqueda, filtros_adicionales
@@ -1178,8 +1179,8 @@ if mongo_uri:
                 ]
             
             try:
-  # USAR TIMESTAMP PARA EVITAR CACHE
-        cache_buster = st.session_state.get('last_delete_time', '')
+                # USAR TIMESTAMP PARA EVITAR CACHE
+                cache_buster = st.session_state.get('last_delete_time', '')
                 
                 with st.spinner("Cargando documentos..."):
                     documentos = list(db.documentos.find(query).sort("fecha_creacion", -1))
@@ -1506,5 +1507,3 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
-
-
