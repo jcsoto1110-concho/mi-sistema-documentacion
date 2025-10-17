@@ -277,27 +277,8 @@ def mostrar_documento(doc, key_suffix=""):
                     except Exception as e:
                         st.error(f"❌ Error al eliminar: {str(e)}")
             
-            # Botón de Copiar ID mejorado
-            doc_id = str(doc['_id'])
-            if st.button("📋 Copiar ID", key=f"copy_{doc['_id']}_{key_suffix}", use_container_width=True):
-                # Crear un área de texto seleccionable con el ID
-                st.text_area(
-                    "ID del documento - Selecciona y copia:",
-                    value=doc_id,
-                    key=f"id_text_{doc['_id']}_{key_suffix}",
-                    height=50
-                )
-                st.success("✅ Selecciona el texto arriba y cópialo con Ctrl+C")
-                
-                # También mostrar información útil
-                with st.expander("📊 Información para desarrolladores"):
-                    st.json({
-                        "ID": doc_id,
-                        "Tipo": doc.get('tipo'),
-                        "Colección": "documentos",
-                        "Fecha creación": doc['fecha_creacion'].isoformat(),
-                        "Tamaño (bytes)": doc.get('tamaño_bytes', 'N/A')
-                    })
+         
+
 # Formulario reutilizable para documentos
 def crear_formulario_documento(tipo_documento):
     """Crea un formulario reutilizable para diferentes tipos de documentos"""
@@ -1490,6 +1471,7 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
