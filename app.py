@@ -91,7 +91,7 @@ with st.sidebar:
     st.markdown("## 🔐 Configuración")
     
     # Logo o imagen de la empresa
-    st.image("https://cdn-icons-png.flaticon.com/512/2721/2721264.png", width=80)
+    st.image("https://cdn-icons-png.flaticon.com/512/2721/2721264.png", width=100)
     
     mongo_uri = st.text_input(
         "**Cadena de Conexión MongoDB**",
@@ -1506,4 +1506,5 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
