@@ -123,7 +123,8 @@ with st.sidebar:
         "**Cadena de Conexión MongoDB**",
         type="password",
         placeholder="mongodb+srv://usuario:contraseña@cluster...",
-        help="Ingresa tu URI de conexión a MongoDB Atlas"
+        help="Ingresa tu URI de conexión a MongoDB Atlas",
+        key="mongo_uri_input"
     )
     
     if mongo_uri:
@@ -146,11 +147,11 @@ with st.sidebar:
             st.markdown("### 📊 Estadísticas")
             col1, col2 = st.columns(2)
             with col1:
-                st.metric("Total Docs", total_docs)
-                st.metric("PDFs", pdf_count)
+                st.metric("Total Docs", total_docs, key="total_docs_metric")
+                st.metric("PDFs", pdf_count, key="pdf_count_metric")
             with col2:
-                st.metric("Word", word_count)
-                st.metric("Texto", text_count)
+                st.metric("Word", word_count, key="word_count_metric")
+                st.metric("Texto", text_count, key="text_count_metric")
         except:
             pass
     else:
@@ -338,10 +339,10 @@ def mostrar_documento_compacto(doc, key_suffix=""):
         st.markdown('</div>', unsafe_allow_html=True)
 
 # Formulario reutilizable para documentos
-def crear_formulario_documento(tipo_documento):
+def crear_formulario_documento(tipo_documento, tab_key):
     """Crea un formulario reutilizable para diferentes tipos de documentos"""
     
-    with st.form(f"form_{tipo_documento}", clear_on_submit=True):
+    with st.form(f"form_{tipo_documento}_{tab_key}", clear_on_submit=True):
         st.markdown(f"### 📝 Información del Documento")
         
         col1, col2 = st.columns(2)
@@ -350,41 +351,48 @@ def crear_formulario_documento(tipo_documento):
             titulo = st.text_input(
                 "**Título del documento** *",
                 placeholder=f"Ej: Manual de Usuario {tipo_documento.upper()}",
-                help="Nombre descriptivo del documento"
+                help="Nombre descriptivo del documento",
+                key=f"titulo_{tipo_documento}_{tab_key}"
             )
             categoria = st.selectbox(
                 "**Categoría** *",
                 ["Técnica", "Usuario", "API", "Tutorial", "prueba", "Procedimiento", "Política", "Otros"],
-                help="Categoría principal del documento"
+                help="Categoría principal del documento",
+                key=f"categoria_{tipo_documento}_{tab_key}"
             )
             autor = st.text_input(
                 "**Autor** *",
                 placeholder="Nombre completo del autor",
-                help="Persona responsable del documento"
+                help="Persona responsable del documento",
+                key=f"autor_{tipo_documento}_{tab_key}"
             )
             
         with col2:
             ci = st.text_input(
                 "**CI/Cédula** *",
                 placeholder="Número de identificación",
-                help="Cédula de identidad del autor"
+                help="Cédula de identidad del autor",
+                key=f"ci_{tipo_documento}_{tab_key}"
             )
             version = st.text_input(
                 "**Versión**",
                 value="1.0",
                 placeholder="Ej: 1.2.3",
-                help="Versión del documento"
+                help="Versión del documento",
+                key=f"version_{tipo_documento}_{tab_key}"
             )
             tags_input = st.text_input(
                 "**Etiquetas**",
                 placeholder="tecnico,manual,instalacion",
-                help="Separar con comas"
+                help="Separar con comas",
+                key=f"tags_{tipo_documento}_{tab_key}"
             )
             prioridad = st.select_slider(
                 "**Prioridad**",
                 options=["Baja", "Media", "Alta"],
                 value="Media",
-                help="Nivel de prioridad del documento"
+                help="Nivel de prioridad del documento",
+                key=f"prioridad_{tipo_documento}_{tab_key}"
             )
         
         # Campos específicos por tipo
@@ -393,24 +401,28 @@ def crear_formulario_documento(tipo_documento):
                 "**Contenido del documento** *",
                 height=200,
                 placeholder="Escribe el contenido completo del documento aquí...",
-                help="Contenido principal en formato texto"
+                help="Contenido principal en formato texto",
+                key=f"contenido_{tipo_documento}_{tab_key}"
             )
         else:
             archivo = st.file_uploader(
                 f"**Seleccionar archivo {tipo_documento.upper()}** *",
                 type=[tipo_documento] if tipo_documento != 'word' else ['docx', 'doc'],
-                help=f"Sube tu archivo {tipo_documento.upper()}"
+                help=f"Sube tu archivo {tipo_documento.upper()}",
+                key=f"archivo_{tipo_documento}_{tab_key}"
             )
             descripcion = st.text_area(
                 "**Descripción del documento**",
                 height=80,
                 placeholder="Breve descripción del contenido del archivo...",
-                help="Resumen del contenido del documento"
+                help="Resumen del contenido del documento",
+                key=f"descripcion_{tipo_documento}_{tab_key}"
             )
         
         submitted = st.form_submit_button(
             f"💾 Guardar Documento {tipo_documento.upper()}",
-            use_container_width=True
+            use_container_width=True,
+            key=f"submit_{tipo_documento}_{tab_key}"
         )
         
         if submitted:
@@ -695,16 +707,13 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
             # Métricas principales
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Archivos Encontrados", len(todos_documentos))
+                st.metric("Archivos Encontrados", len(todos_documentos), key="archivos_encontrados_metric")
             with col2:
-                st.metric("Procesados Exitosos", documentos_exitosos,
-                         delta=f"{(documentos_exitosos/len(todos_documentos)*100):.1f}%")
+                st.metric("Procesados Exitosos", documentos_exitosos, key="exitosos_metric")
             with col3:
-                st.metric("Fallidos", documentos_fallidos,
-                         delta=f"-{(documentos_fallidos/len(todos_documentos)*100):.1f}%" if documentos_fallidos > 0 else None,
-                         delta_color="inverse")
+                st.metric("Fallidos", documentos_fallidos, key="fallidos_metric")
             with col4:
-                st.metric("CIs Procesados", cis_procesados)
+                st.metric("CIs Procesados", cis_procesados, key="cis_procesados_metric")
             
             if documentos_exitosos > 0:
                 st.success(f"🎉 Carga masiva completada! {documentos_exitosos} documentos procesados exitosamente.")
@@ -791,7 +800,7 @@ if mongo_uri:
                     criterio_busqueda = st.text_input(
                         "**Término de búsqueda**",
                         placeholder="Ingresa palabras clave, nombre, CI, autor...",
-                        key="busqueda_principal"
+                        key="busqueda_principal_tab1"
                     )
                 
                 with col2:
@@ -806,22 +815,23 @@ if mongo_uri:
                             "categoria": "📂 Categoría",
                             "ci": "🔢 CI/Cédula",
                             "descripcion": "📋 Descripción"
-                        }[x]
+                        }[x],
+                        key="tipo_busqueda_tab1"
                     )
                 
                 with col3:
                     st.write("")
                     st.write("")
-                    buscar_btn = st.button("🔎 Ejecutar Búsqueda", use_container_width=True)
+                    buscar_btn = st.button("🔎 Ejecutar Búsqueda", use_container_width=True, key="buscar_btn_tab1")
             
             # Filtros adicionales compactos
             col_f1, col_f2, col_f3 = st.columns(3)
             with col_f1:
-                filtro_tipo_busq = st.selectbox("Filtrar por tipo", ["Todos", "Texto", "PDF", "Word", "Imagen"])
+                filtro_tipo_busq = st.selectbox("Filtrar por tipo", ["Todos", "Texto", "PDF", "Word", "Imagen"], key="filtro_tipo_tab1")
             with col_f2:
-                filtro_categoria_busq = st.selectbox("Filtrar por categoría", ["Todas"] + ["Técnica", "Usuario", "API", "Tutorial", "Referencia", "Procedimiento", "Política", "Otros"])
+                filtro_categoria_busq = st.selectbox("Filtrar por categoría", ["Todas"] + ["Técnica", "Usuario", "API", "Tutorial", "Referencia", "Procedimiento", "Política", "Otros"], key="filtro_categoria_tab1")
             with col_f3:
-                filtro_prioridad_busq = st.selectbox("Filtrar por prioridad", ["Todas", "Alta", "Media", "Baja"])
+                filtro_prioridad_busq = st.selectbox("Filtrar por prioridad", ["Todas", "Alta", "Media", "Baja"], key="filtro_prioridad_tab1")
             
             # Realizar búsqueda
             if buscar_btn and criterio_busqueda:
@@ -859,17 +869,17 @@ if mongo_uri:
         # PESTAÑA 2: Crear Texto Simple
         with tab2:
             st.markdown("### Crear Documento de Texto")
-            crear_formulario_documento("texto")
+            crear_formulario_documento("texto", "tab2")
         
         # PESTAÑA 3: Subir PDF
         with tab3:
             st.markdown("### Subir Documento PDF")
-            crear_formulario_documento("pdf")
+            crear_formulario_documento("pdf", "tab3")
         
         # PESTAÑA 4: Subir Word
         with tab4:
             st.markdown("### Subir Documento Word")
-            crear_formulario_documento("word")
+            crear_formulario_documento("word", "tab4")
         
         # PESTAÑA 5: Todos los Documentos
         with tab5:
@@ -879,16 +889,16 @@ if mongo_uri:
             with st.expander("**🎛️ Filtros Avanzados**", expanded=False):
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    filtro_tipo = st.selectbox("Tipo de documento", ["Todos", "Texto", "PDF", "Word", "Imagen"], key="filtro_tipo_all")
+                    filtro_tipo = st.selectbox("Tipo de documento", ["Todos", "Texto", "PDF", "Word", "Imagen"], key="filtro_tipo_tab5")
                 with col2:
-                    filtro_categoria = st.selectbox("Categoría", ["Todas"] + ["Técnica", "Usuario", "API", "Tutorial", "Referencia", "Procedimiento", "Política", "Otros"], key="filtro_categoria_all")
+                    filtro_categoria = st.selectbox("Categoría", ["Todas"] + ["Técnica", "Usuario", "API", "Tutorial", "Referencia", "Procedimiento", "Política", "Otros"], key="filtro_categoria_tab5")
                 with col3:
-                    filtro_prioridad = st.selectbox("Prioridad", ["Todas", "Alta", "Media", "Baja"], key="filtro_prioridad_all")
+                    filtro_prioridad = st.selectbox("Prioridad", ["Todas", "Alta", "Media", "Baja"], key="filtro_prioridad_tab5")
                 with col4:
-                    fecha_desde = st.date_input("Desde fecha", key="fecha_desde")
+                    fecha_desde = st.date_input("Desde fecha", key="fecha_desde_tab5")
             
             # Búsqueda rápida
-            busqueda_rapida = st.text_input("🔍 Búsqueda rápida por título o CI", key="busqueda_rapida_all")
+            busqueda_rapida = st.text_input("🔍 Búsqueda rápida por título o CI", key="busqueda_rapida_tab5")
             
             # Construir query
             query = {}
@@ -946,20 +956,23 @@ if mongo_uri:
                     "**Ruta base de carpetas CI** *",
                     value="C:\\documentos\\",
                     placeholder="C:\\ruta\\carpetas_ci\\",
-                    help="Ruta donde están las carpetas organizadas por número de CI"
+                    help="Ruta donde están las carpetas organizadas por número de CI",
+                    key="ruta_base_tab6"
                 )
                 
                 tipos_archivo = st.multiselect(
                     "**Tipos de archivo a procesar** *",
                     ['.pdf', '.docx', '.doc', '.jpg', '.jpeg', '.png', '.txt'],
                     default=['.pdf', '.docx', '.doc'],
-                    help="Selecciona los tipos de archivo a incluir"
+                    help="Selecciona los tipos de archivo a incluir",
+                    key="tipos_archivo_tab6"
                 )
                 
                 procesar_subcarpetas = st.checkbox(
                     "**Procesar subcarpetas dentro de cada CI**",
                     value=True,
-                    help="Buscar documentos en subcarpetas dentro de cada carpeta de CI"
+                    help="Buscar documentos en subcarpetas dentro de cada carpeta de CI",
+                    key="procesar_subcarpetas_tab6"
                 )
             
             with col_config2:
@@ -970,7 +983,8 @@ if mongo_uri:
                     max_value=10000,
                     value=3000,
                     step=100,
-                    help="Máximo número de documentos a procesar"
+                    help="Máximo número de documentos a procesar",
+                    key="max_documentos_tab6"
                 )
                 
                 tamaño_lote = st.slider(
@@ -978,13 +992,15 @@ if mongo_uri:
                     min_value=50,
                     max_value=500,
                     value=100,
-                    help="Documentos procesados por lote (mejora performance)"
+                    help="Documentos procesados por lote (mejora performance)",
+                    key="tamaño_lote_tab6"
                 )
                 
                 sobrescribir_existentes = st.checkbox(
                     "**Sobrescribir documentos existentes**",
                     value=False,
-                    help="Reemplazar documentos que ya existen en la base de datos"
+                    help="Reemplazar documentos que ya existen en la base de datos",
+                    key="sobrescribir_existentes_tab6"
                 )
             
             # Sección para CSV de metadatos
@@ -1004,7 +1020,8 @@ if mongo_uri:
             archivo_csv = st.file_uploader(
                 "**Subir CSV con metadatos** *",
                 type=['csv'],
-                help="CSV con información de CI, nombres, títulos, etc."
+                help="CSV con información de CI, nombres, títulos, etc.",
+                key="archivo_csv_tab6"
             )
             
             # Previsualización del CSV
@@ -1019,12 +1036,12 @@ if mongo_uri:
                         # Estadísticas del CSV
                         col_stats1, col_stats2, col_stats3 = st.columns(3)
                         with col_stats1:
-                            st.metric("Total CIs", len(df_metadatos))
+                            st.metric("Total CIs", len(df_metadatos), key="total_cis_tab6")
                         with col_stats2:
-                            st.metric("Columnas", len(df_metadatos.columns))
+                            st.metric("Columnas", len(df_metadatos.columns), key="columnas_tab6")
                         with col_stats3:
                             cis_unicos = df_metadatos['ci'].nunique() if 'ci' in df_metadatos.columns else 0
-                            st.metric("CIs Únicos", cis_unicos)
+                            st.metric("CIs Únicos", cis_unicos, key="cis_unicos_tab6")
                 
                 except Exception as e:
                     st.error(f"❌ Error al leer el CSV: {str(e)}")
@@ -1037,7 +1054,7 @@ if mongo_uri:
             # Botón de procesamiento
             st.markdown("#### ⚡ Procesamiento Masivo")
             
-            if st.button("🚀 Iniciar Carga Masiva", type="primary", use_container_width=True):
+            if st.button("🚀 Iniciar Carga Masiva", type="primary", use_container_width=True, key="btn_carga_masiva_tab6"):
                 if not archivo_csv:
                     st.error("❌ Debes subir un archivo CSV con los metadatos")
                 elif not ruta_base:
@@ -1090,14 +1107,16 @@ if mongo_uri:
                     "**Ruta de carpeta de archivos** *",
                     value="C:\\subir_archivos\\",
                     placeholder="C:\\subir_archivos\\",
-                    help="Ruta donde están todos los archivos"
+                    help="Ruta donde están todos los archivos",
+                    key="ruta_base_local_tab7"
                 )
                 
                 tipos_archivo_local = st.multiselect(
                     "**Tipos de archivo a procesar** *",
                     ['.pdf', '.docx', '.doc', '.jpg', '.jpeg', '.png', '.txt'],
                     default=['.pdf', '.docx', '.doc'],
-                    help="Selecciona los tipos de archivo a incluir"
+                    help="Selecciona los tipos de archivo a incluir",
+                    key="tipos_archivo_local_tab7"
                 )
             
             with col_config2:
@@ -1107,22 +1126,25 @@ if mongo_uri:
                     max_value=10000,
                     value=3000,
                     step=100,
-                    help="Máximo número de documentos a procesar"
+                    help="Máximo número de documentos a procesar",
+                    key="max_documentos_local_tab7"
                 )
                 
                 patron_busqueda = st.selectbox(
                     "**Patrón de búsqueda de CI**",
                     ["CI al inicio", "CI en cualquier parte", "CI específico en nombre"],
-                    help="Cómo buscar el CI en los nombres de archivo"
+                    help="Cómo buscar el CI en los nombres de archivo",
+                    key="patron_busqueda_tab7"
                 )
             
             archivo_csv_local = st.file_uploader(
                 "**Subir CSV con metadatos** *",
                 type=['csv'],
-                help="CSV con información de CI, nombres, títulos, etc."
+                help="CSV con información de CI, nombres, títulos, etc.",
+                key="archivo_csv_local_tab7"
             )
             
-            if st.button("🚀 Iniciar Carga Local", type="primary", use_container_width=True):
+            if st.button("🚀 Iniciar Carga Local", type="primary", use_container_width=True, key="btn_carga_local_tab7"):
                 st.info("ℹ️ Esta funcionalidad está disponible en la versión completa")
 
     else:
