@@ -269,29 +269,28 @@ def mostrar_documento(doc, key_suffix=""):
             # Botones de acción
             st.write("")  # Espacio
             
-            # SOLUCIÓN DEFINITIVA - Usar form para mejor manejo de estado
-            with st.form(key=f"delete_form_{doc['_id']}_{key_suffix}"):
-                if st.form_submit_button("🗑️ Eliminar", use_container_width=True):
-                    with st.spinner("Eliminando..."):
-                        try:
-                            # Verificar conexión
-                            client = db.client
-                            client.admin.command('ping')
+            # SOLUCIÓN MEJORADA - Botón de eliminar
+            if st.button("🗑️ Eliminar", key=f"delete_{doc['_id']}_{key_suffix}", use_container_width=True):
+                with st.spinner("Eliminando documento..."):
+                    try:
+                        # Verificar que la conexión a la base de datos funciona
+                        db.command('ping')
+                        
+                        # Intentar eliminar el documento
+                        result = db.documentos.delete_one({"_id": doc["_id"]})
+                        
+                        if result.deleted_count > 0:
+                            st.success("✅ Documento eliminado correctamente")
+                            # Forzar actualización inmediata
+                            st.session_state.force_refresh = True
+                            time.sleep(1.5)
+                            st.rerun()
+                        else:
+                            st.error("❌ No se pudo eliminar el documento. Puede que ya haya sido eliminado.")
                             
-                            # Eliminar documento
-                            result = db.documentos.delete_one({"_id": doc["_id"]})
-                            
-                            if result.deleted_count > 0:
-                                st.success("✅ ¡Documento eliminado!")
-                                # Marcar para refrescar
-                                st.session_state.deleted_docs = st.session_state.get('deleted_docs', []) + [str(doc['_id'])]
-                                time.sleep(2)
-                                st.rerun()
-                            else:
-                                st.error("⚠️ El documento no existe o ya fue eliminado")
-                                
-                        except Exception as e:
-                            st.error(f"❌ Error: {str(e)}")
+                    except Exception as e:
+                        st.error(f"❌ Error al conectar con la base de datos: {str(e)}")
+
 
 # Formulario reutilizable para documentos
 def crear_formulario_documento(tipo_documento):
@@ -1485,6 +1484,7 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
