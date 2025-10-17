@@ -30,7 +30,9 @@ if 'db_connection' not in st.session_state:
 if 'db_connected' not in st.session_state:
     st.session_state.db_connected = False
 if 'current_user' not in st.session_state:
-    st.session_state.current_user = "Invitado"
+    st.session_state.current_user = "No conectado"
+if 'mongo_username' not in st.session_state:
+    st.session_state.mongo_username = "Desconocido"
 
 # CSS personalizado para mejorar la apariencia
 st.markdown("""
@@ -135,15 +137,37 @@ def connect_mongodb(uri):
         client = pymongo.MongoClient(uri, serverSelectionTimeoutMS=5000)
         client.admin.command('ping')
         db = client.documentation_db
-        return db, True, "Conexión exitosa"
+        
+        # Extraer nombre de usuario de la URI
+        username = "Desconocido"
+        try:
+            # Intentar extraer usuario de la URI de conexión
+            if "mongodb+srv://" in uri:
+                # Formato: mongodb+srv://usuario:contraseña@cluster...
+                user_part = uri.split("mongodb+srv://")[1].split(":")[0]
+                if "@" in user_part:
+                    username = user_part.split("@")[0]
+                else:
+                    username = user_part
+            elif "mongodb://" in uri:
+                # Formato: mongodb://usuario:contraseña@host...
+                user_part = uri.split("mongodb://")[1].split(":")[0]
+                if "@" in user_part:
+                    username = user_part.split("@")[0]
+                else:
+                    username = user_part
+        except:
+            username = "Usuario BD"
+        
+        return db, True, "Conexión exitosa", username
     except pymongo.errors.ServerSelectionTimeoutError:
-        return None, False, "Error: Timeout de conexión"
+        return None, False, "Error: Timeout de conexión", "Desconocido"
     except pymongo.errors.ConnectionFailure:
-        return None, False, "Error: No se pudo conectar al servidor"
+        return None, False, "Error: No se pudo conectar al servidor", "Desconocido"
     except Exception as e:
-        return None, False, f"Error: {str(e)}"
+        return None, False, f"Error: {str(e)}", "Desconocido"
 
-# --- NUEVAS FUNCIONES PARA CARGA LOCAL ---
+# --- FUNCIONES PARA CARGA LOCAL ---
 
 def extraer_ci_desde_nombre(nombre_archivo, patron_busqueda):
     """
@@ -256,8 +280,8 @@ def procesar_archivo_local(archivo_path, ci, metadatos_ci, config):
             "fecha_modificacion_local": fecha_modificacion,
             "fecha_creacion": datetime.utcnow(),
             "fecha_actualizacion": datetime.utcnow(),
-            "usuario_creacion": st.session_state.current_user,
-            "usuario_actualizacion": st.session_state.current_user,
+            "usuario_creacion": st.session_state.mongo_username,
+            "usuario_actualizacion": st.session_state.mongo_username,
             "procesado_local": True,
             "lote_carga": config.get('lote_id'),
             "almacenamiento": "local"  # Indica que el archivo está en sistema local
@@ -395,7 +419,7 @@ def procesar_carga_local(db, ruta_base, df_metadatos, tipos_archivo, max_documen
                 st.metric("CIs Encontrados", len(cis_encontrados))
             
             if documentos_exitosos > 0:
-                st.success(f"🎉 Carga local completada por {st.session_state.current_user}! {documentos_exitosos} documentos procesados exitosamente.")
+                st.success(f"🎉 Carga local completada por {st.session_state.mongo_username}! {documentos_exitosos} documentos procesados exitosamente.")
                 st.balloons()
                 
                 # Mostrar detalles adicionales
@@ -422,459 +446,27 @@ def procesar_carga_local(db, ruta_base, df_metadatos, tipos_archivo, max_documen
     except Exception as e:
         st.error(f"❌ Error en el procesamiento local: {str(e)}")
 
-# Sidebar mejorado
-with st.sidebar:
-    st.markdown("## 🔐 Configuración")
-    
-    # Logo o imagen de la empresa
-    st.image("https://cdn-icons-png.flaticon.com/512/2721/2721264.png", width=80)
-    
-    # Selección de usuario
-    st.markdown("### 👤 Usuario Actual")
-    usuario_actual = st.selectbox(
-        "Selecciona tu usuario:",
-        ["Invitado", "Admin", "Usuario1", "Usuario2", "Editor", "Revisor"],
-        help="Selecciona tu identidad para registrar tus acciones",
-        key="user_selection"
-    )
-    
-    # Actualizar usuario en session_state
-    if usuario_actual != st.session_state.current_user:
-        st.session_state.current_user = usuario_actual
-        st.rerun()
-    
-    # Mostrar badge del usuario actual
-    st.markdown(f'<div class="user-badge">👤 {st.session_state.current_user}</div>', unsafe_allow_html=True)
-    
-    mongo_uri = st.text_input(
-        "**Cadena de Conexión MongoDB**",
-        type="password",
-        placeholder="mongodb+srv://usuario:contraseña@cluster...",
-        help="Ingresa tu URI de conexión a MongoDB Atlas",
-        key="mongo_uri_input"
-    )
-    
-    # Botón para conectar/desconectar
-    col_conn1, col_conn2 = st.columns(2)
-    with col_conn1:
-        connect_btn = st.button("🔗 Conectar", use_container_width=True, key="connect_btn")
-    with col_conn2:
-        disconnect_btn = st.button("🔓 Desconectar", use_container_width=True, key="disconnect_btn")
-    
-    if disconnect_btn:
-        st.session_state.db_connection = None
-        st.session_state.db_connected = False
-        st.session_state.current_user = "Invitado"
-        st.session_state.last_delete_time = datetime.now().timestamp()
-        st.success("🔓 Desconectado de la base de datos")
-        st.rerun()
-    
-    if connect_btn and mongo_uri:
-        with st.spinner("Conectando a MongoDB..."):
-            db, connected, message = connect_mongodb(mongo_uri)
-            if connected:
-                st.session_state.db_connection = db
-                st.session_state.db_connected = True
-                st.session_state.last_delete_time = datetime.now().timestamp()
-                st.success(f"✅ {message}")
-            else:
-                st.error(f"❌ {message}")
-    
-    # Mostrar estadísticas si hay conexión
-    if st.session_state.db_connected:
-        st.success(f"✅ Conexión activa | 👤 {st.session_state.current_user}")
-        st.markdown("---")
-        
-        try:
-            db = st.session_state.db_connection
-            
-            total_docs = db.documentos.count_documents({})
-            pdf_count = db.documentos.count_documents({"tipo": "pdf"})
-            word_count = db.documentos.count_documents({"tipo": "word"})
-            text_count = db.documentos.count_documents({"tipo": "texto"})
-            image_count = db.documentos.count_documents({"tipo": "imagen"})
-            local_count = db.documentos.count_documents({"almacenamiento": "local"})
-            usuarios_activos = db.documentos.distinct("usuario_creacion")
-            
-            st.markdown("### 📊 Estadísticas")
-            
-            # Métricas principales
-            st.metric("📄 Total Documentos", total_docs)
-            
-            # Estadísticas por tipo
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("📝 Texto", text_count)
-                st.metric("📄 PDF", pdf_count)
-            with col2:
-                st.metric("📋 Word", word_count)
-                st.metric("🖼️ Imágenes", image_count)
-            
-            # Estadísticas adicionales
-            st.metric("👥 Usuarios Activos", len(usuarios_activos))
-            st.metric("💾 Archivos Locales", local_count)
-                
-        except Exception as e:
-            st.error(f"❌ Error obteniendo estadísticas: {str(e)}")
-            st.session_state.db_connection = None
-            st.session_state.db_connected = False
-    
-    elif mongo_uri and not st.session_state.db_connected:
-        st.warning("⚠️ Presiona 'Conectar' para establecer la conexión")
-    else:
-        st.info("👈 Ingresa la cadena de conexión MongoDB")
-
-# ... (el resto de las funciones existentes se mantienen igual: procesar_archivo, crear_boton_descarga, buscar_documentos, mostrar_documento_compacto, crear_formulario_documento, validar_y_guardar_documento, validar_csv_metadatos, buscar_archivos_por_ci, procesar_archivo_masivo, procesar_carga_masiva_ci, crear_plantilla_carga_masiva)
-
-# Funciones de procesamiento mejoradas
-def procesar_archivo(archivo, tipo_archivo):
-    try:
-        contenido_binario = archivo.read()
-        return Binary(contenido_binario), len(contenido_binario), None
-    except Exception as e:
-        return None, 0, f"Error procesando {tipo_archivo}: {e}"
-
-# Función para descargar archivos mejorada
-def crear_boton_descarga(contenido_binario, nombre_archivo, tipo_archivo):
-    try:
-        b64 = base64.b64encode(contenido_binario).decode()
-        
-        mime_types = {
-            "pdf": "application/pdf",
-            "word": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "doc": "application/msword",
-            "imagen": "image/jpeg"
-        }
-        
-        mime_type = mime_types.get(tipo_archivo, "application/octet-stream")
-        
-        href = f'''
-        <a href="data:{mime_type};base64,{b64}" download="{nombre_archivo}" 
-           style="background-color: #4CAF50; color: white; padding: 8px 12px; 
-                  text-decoration: none; border-radius: 5px; display: inline-block;
-                  font-weight: bold; font-size: 0.8rem;">
-           📥 Descargar
-        </a>
-        '''
-        return href
-    except Exception as e:
-        return f"❌ Error: {e}"
-
-# Función de búsqueda mejorada
-def buscar_documentos(db, criterio_busqueda, tipo_busqueda, filtros_adicionales=None):
-    try:
-        query = {}
-        
-        # Mapeo de tipos de búsqueda
-        busqueda_map = {
-            "nombre": "titulo",
-            "autor": "autor",
-            "contenido": "contenido",
-            "tags": "tags",
-            "categoria": "categoria",
-            "ci": "ci",
-            "descripcion": "descripcion",
-            "usuario": "usuario_creacion"
-        }
-        
-        campo = busqueda_map.get(tipo_busqueda)
-        if campo:
-            if tipo_busqueda == "tags":
-                query[campo] = {"$in": [criterio_busqueda.strip()]}
-            else:
-                query[campo] = {"$regex": criterio_busqueda, "$options": "i"}
-        
-        # Aplicar filtros adicionales
-        if filtros_adicionales:
-            query.update(filtros_adicionales)
-        
-        documentos = list(db.documentos.find(query).sort("fecha_creacion", -1))
-        return documentos, None
-        
-    except Exception as e:
-        return None, str(e)
-
-# Función para mostrar documentos de manera COMPACTA
-def mostrar_documento_compacto(doc, key_suffix=""):
-    """Muestra un documento en formato compacto y profesional"""
-    
-    iconos = {
-        "pdf": "📄",
-        "word": "📝", 
-        "texto": "📃",
-        "imagen": "🖼️"
-    }
-    
-    icono = iconos.get(doc.get('tipo'), '📎')
-    doc_id = str(doc['_id'])
-    
-    # Crear tarjeta compacta
-    with st.container():
-        st.markdown(f'<div class="document-card">', unsafe_allow_html=True)
-        
-        col1, col2 = st.columns([5, 1])
-        
-        with col1:
-            # Header compacto
-            st.markdown(f"**{icono} {doc['titulo']}**")
-            
-            # Metadatos en línea compacta
-            meta_col1, meta_col2, meta_col3 = st.columns(3)
-            with meta_col1:
-                st.markdown(f'<div class="compact-metadata">👤 **Autor:** {doc["autor"]}</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="compact-metadata">📂 **Categoría:** {doc["categoria"]}</div>', unsafe_allow_html=True)
-            with meta_col2:
-                st.markdown(f'<div class="compact-metadata">🔢 **CI:** {doc.get("ci", "N/A")}</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="compact-metadata">🔄 **Versión:** {doc["version"]}</div>', unsafe_allow_html=True)
-            with meta_col3:
-                st.markdown(f'<div class="compact-metadata">📅 **Creado:** {doc["fecha_creacion"].strftime("%d/%m/%Y")}</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="compact-metadata">👥 **Por:** {doc.get("usuario_creacion", "N/A")}</div>', unsafe_allow_html=True)
-            
-            # Información de almacenamiento
-            if doc.get('almacenamiento') == 'local':
-                st.markdown(f'<div class="compact-metadata">💾 **Almacenamiento:** Local ({doc.get("ruta_local", "N/A")})</div>', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<div class="compact-metadata">💾 **Almacenamiento:** Base de datos</div>', unsafe_allow_html=True)
-            
-            if doc.get('fecha_actualizacion') and doc.get('usuario_actualizacion'):
-                st.markdown(f'<div class="compact-metadata">✏️ **Actualizado:** {doc["fecha_actualizacion"].strftime("%d/%m/%Y")} por {doc["usuario_actualizacion"]}</div>', unsafe_allow_html=True)
-            
-            # Tags compactos
-            if doc.get('tags'):
-                tags_html = " ".join([f'<span class="tag">{tag}</span>' for tag in doc['tags']])
-                st.markdown(f'<div class="compact-metadata">🏷️ **Tags:** {tags_html}</div>', unsafe_allow_html=True)
-            
-            # Información específica del tipo
-            if doc.get('tipo') == 'texto':
-                contenido_preview = doc['contenido'][:100] + "..." if len(doc['contenido']) > 100 else doc['contenido']
-                st.markdown(f'<div class="compact-metadata">📝 **Contenido:** {contenido_preview}</div>', unsafe_allow_html=True)
-            elif doc.get('tipo') in ['pdf', 'word']:
-                st.markdown(f'<div class="compact-metadata">📋 **Archivo:** {doc.get("nombre_archivo", "N/A")}</div>', unsafe_allow_html=True)
-                if doc.get('tamaño_bytes'):
-                    tamaño_mb = doc['tamaño_bytes'] / (1024 * 1024)
-                    st.markdown(f'<div class="compact-metadata">💾 **Tamaño:** {tamaño_mb:.2f} MB</div>', unsafe_allow_html=True)
-                
-                # Botón de descarga solo para archivos en base de datos
-                if doc.get('contenido_binario') and doc.get('almacenamiento') != 'local':
-                    boton_descarga = crear_boton_descarga(
-                        doc['contenido_binario'],
-                        doc['nombre_archivo'],
-                        doc['tipo']
-                    )
-                    st.markdown(boton_descarga, unsafe_allow_html=True)
-                elif doc.get('almacenamiento') == 'local':
-                    st.markdown(f'<div class="compact-metadata">📍 **Archivo local:** No disponible para descarga directa</div>', unsafe_allow_html=True)
-            
-            # ID único (pequeño y discreto)
-            st.markdown(f'<div class="compact-metadata" style="font-size: 0.7rem; color: #999;">🆔 **ID:** {doc_id[:12]}...</div>', unsafe_allow_html=True)
-        
-        with col2:
-            # Botón de eliminar compacto
-            st.write("")  # Espacio
-            if st.button("🗑️", key=f"delete_{doc_id}_{key_suffix}", help="Eliminar documento", use_container_width=True):
-                with st.spinner("Eliminando..."):
-                    try:
-                        # Verificar que el documento existe antes de eliminar
-                        doc_existente = st.session_state.db_connection.documentos.find_one({"_id": doc["_id"]})
-                        if not doc_existente:
-                            st.error("❌ El documento ya no existe")
-                            return
-                        
-                        # Eliminar el documento
-                        result = st.session_state.db_connection.documentos.delete_one({"_id": doc["_id"]})
-                        
-                        if result.deleted_count > 0:
-                            st.success("✅ Documento eliminado")
-                            
-                            # ACTUALIZAR SESSION_STATE PARA INVALIDAR CACHE
-                            st.session_state.last_delete_time = datetime.now().timestamp()
-                            st.session_state.refresh_counter += 1
-                            
-                            # Esperar y recargar
-                            time.sleep(1.5)
-                            st.rerun()
-                        else:
-                            st.error("❌ No se pudo eliminar")
-                            
-                    except Exception as e:
-                        st.error(f"❌ Error: {str(e)}")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-
-# Formulario reutilizable para documentos
-def crear_formulario_documento(tipo_documento, tab_key):
-    """Crea un formulario reutilizable para diferentes tipos de documentos"""
-    
-    with st.form(f"form_{tipo_documento}_{tab_key}", clear_on_submit=True):
-        st.markdown(f"### 📝 Información del Documento")
-        
-        # Mostrar usuario actual que realizará la acción
-        st.info(f"**Usuario actual:** 👤 {st.session_state.current_user}")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            titulo = st.text_input(
-                "**Título del documento** *",
-                placeholder=f"Ej: Manual de Usuario {tipo_documento.upper()}",
-                help="Nombre descriptivo del documento",
-                key=f"titulo_{tipo_documento}_{tab_key}"
-            )
-            categoria = st.selectbox(
-                "**Categoría** *",
-                ["Técnica", "Usuario", "API", "Tutorial", "prueba", "Procedimiento", "Política", "Otros"],
-                help="Categoría principal del documento",
-                key=f"categoria_{tipo_documento}_{tab_key}"
-            )
-            autor = st.text_input(
-                "**Autor** *",
-                placeholder="Nombre completo del autor",
-                help="Persona responsable del documento",
-                key=f"autor_{tipo_documento}_{tab_key}"
-            )
-            
-        with col2:
-            ci = st.text_input(
-                "**CI/Cédula** *",
-                placeholder="Número de identificación",
-                help="Cédula de identidad del autor",
-                key=f"ci_{tipo_documento}_{tab_key}"
-            )
-            version = st.text_input(
-                "**Versión**",
-                value="1.0",
-                placeholder="Ej: 1.2.3",
-                help="Versión del documento",
-                key=f"version_{tipo_documento}_{tab_key}"
-            )
-            tags_input = st.text_input(
-                "**Etiquetas**",
-                placeholder="tecnico,manual,instalacion",
-                help="Separar con comas",
-                key=f"tags_{tipo_documento}_{tab_key}"
-            )
-            prioridad = st.select_slider(
-                "**Prioridad**",
-                options=["Baja", "Media", "Alta"],
-                value="Media",
-                help="Nivel de prioridad del documento",
-                key=f"prioridad_{tipo_documento}_{tab_key}"
-            )
-        
-        # Campos específicos por tipo
-        if tipo_documento == "texto":
-            contenido = st.text_area(
-                "**Contenido del documento** *",
-                height=200,
-                placeholder="Escribe el contenido completo del documento aquí...",
-                help="Contenido principal en formato texto",
-                key=f"contenido_{tipo_documento}_{tab_key}"
-            )
-        else:
-            archivo = st.file_uploader(
-                f"**Seleccionar archivo {tipo_documento.upper()}** *",
-                type=[tipo_documento] if tipo_documento != 'word' else ['docx', 'doc'],
-                help=f"Sube tu archivo {tipo_documento.upper()}",
-                key=f"archivo_{tipo_documento}_{tab_key}"
-            )
-            descripcion = st.text_area(
-                "**Descripción del documento**",
-                height=80,
-                placeholder="Breve descripción del contenido del archivo...",
-                help="Resumen del contenido del documento",
-                key=f"descripcion_{tipo_documento}_{tab_key}"
-            )
-        
-        submitted = st.form_submit_button(
-            f"💾 Guardar Documento {tipo_documento.upper()}",
-            use_container_width=True,
-            key=f"submit_{tipo_documento}_{tab_key}"
-        )
-        
-        if submitted:
-            return validar_y_guardar_documento(tipo_documento, locals())
-    
-    return False
-
-def validar_y_guardar_documento(tipo_documento, variables_locales):
-    """Valida y guarda el documento en la base de datos"""
-    
-    # Extraer variables del contexto local
-    titulo = variables_locales['titulo']
-    autor = variables_locales['autor']
-    ci = variables_locales['ci']
-    
-    if not all([titulo, autor, ci]):
-        st.warning("⚠️ Completa los campos obligatorios (*)")
-        return False
-    
-    if tipo_documento == "texto":
-        if not variables_locales['contenido']:
-            st.warning("⚠️ El contenido del documento es obligatorio")
-            return False
-    else:
-        if not variables_locales['archivo']:
-            st.warning("⚠️ Debes seleccionar un archivo")
-            return False
-    
-    # Preparar documento
-    documento = {
-        "titulo": titulo,
-        "categoria": variables_locales['categoria'],
-        "autor": autor,
-        "ci": ci,
-        "version": variables_locales['version'],
-        "tags": [tag.strip() for tag in variables_locales['tags_input'].split(",")] if variables_locales['tags_input'] else [],
-        "prioridad": variables_locales['prioridad'],
-        "tipo": tipo_documento,
-        "fecha_creacion": datetime.utcnow(),
-        "fecha_actualizacion": datetime.utcnow(),
-        "usuario_creacion": st.session_state.current_user,
-        "usuario_actualizacion": st.session_state.current_user,
-        "almacenamiento": "base_datos"  # Para documentos subidos directamente
-    }
-    
-    if tipo_documento == "texto":
-        documento["contenido"] = variables_locales['contenido']
-    else:
-        archivo = variables_locales['archivo']
-        contenido_binario, tamaño, error = procesar_archivo(archivo, tipo_documento)
-        
-        if error:
-            st.error(f"❌ {error}")
-            return False
-            
-        documento.update({
-            "descripcion": variables_locales['descripcion'],
-            "nombre_archivo": archivo.name,
-            "contenido_binario": contenido_binario,
-            "tamaño_bytes": tamaño
-        })
-    
-    try:
-        result = st.session_state.db_connection.documentos.insert_one(documento)
-        st.success(f"✅ Documento '{titulo}' guardado exitosamente por {st.session_state.current_user}!")
-        st.balloons()
-        
-        # Actualizar timestamp para refrescar estadísticas
-        st.session_state.last_delete_time = datetime.now().timestamp()
-        return True
-    except Exception as e:
-        st.error(f"❌ Error al guardar: {str(e)}")
-        return False
-
 # --- FUNCIONES PARA CARGA MASIVA ---
 
 def validar_csv_metadatos(df):
     """Valida la estructura del CSV de metadatos"""
     errores = []
     
+    # Verificar que el DataFrame no esté vacío
+    if df.empty:
+        errores.append("El archivo CSV está vacío")
+        return errores
+    
+    # Verificar que tenga columnas
+    if len(df.columns) == 0:
+        errores.append("El archivo CSV no tiene columnas")
+        return errores
+    
     # Campos obligatorios
-    if 'ci' not in df.columns:
-        errores.append("Falta columna obligatoria: 'ci'")
-    if 'nombre' not in df.columns:
-        errores.append("Falta columna obligatoria: 'nombre'")
+    campos_obligatorios = ['ci', 'nombre']
+    for campo in campos_obligatorios:
+        if campo not in df.columns:
+            errores.append(f"Falta columna obligatoria: '{campo}'")
     
     if errores:
         return errores
@@ -960,8 +552,8 @@ def procesar_archivo_masivo(archivo_path, ci, metadatos_ci, config):
             "ruta_original": str(archivo_path),
             "fecha_creacion": datetime.utcnow(),
             "fecha_actualizacion": datetime.utcnow(),
-            "usuario_creacion": st.session_state.current_user,
-            "usuario_actualizacion": st.session_state.current_user,
+            "usuario_creacion": st.session_state.mongo_username,
+            "usuario_actualizacion": st.session_state.mongo_username,
             "procesado_masivo": True,
             "lote_carga": config.get('lote_id'),
             "almacenamiento": "base_datos"
@@ -1092,7 +684,7 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
                 st.metric("CIs Procesados", cis_procesados)
             
             if documentos_exitosos > 0:
-                st.success(f"🎉 Carga masiva completada por {st.session_state.current_user}! {documentos_exitosos} documentos procesados exitosamente.")
+                st.success(f"🎉 Carga masiva completada por {st.session_state.mongo_username}! {documentos_exitosos} documentos procesados exitosamente.")
                 st.balloons()
                 
                 # Actualizar estadísticas
@@ -1105,7 +697,448 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
     except Exception as e:
         st.error(f"❌ Error en el procesamiento masivo: {str(e)}")
 
-# --- FUNCIÓN SIMPLIFICADA PARA CREAR PLANTILLA CSV ---
+# --- FUNCIONES PARA CARGA INDIVIDUAL ---
+
+def procesar_archivo(archivo, tipo_archivo):
+    try:
+        contenido_binario = archivo.read()
+        return Binary(contenido_binario), len(contenido_binario), None
+    except Exception as e:
+        return None, 0, f"Error procesando {tipo_archivo}: {e}"
+
+def crear_boton_descarga(contenido_binario, nombre_archivo, tipo_archivo):
+    try:
+        b64 = base64.b64encode(contenido_binario).decode()
+        
+        mime_types = {
+            "pdf": "application/pdf",
+            "word": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "doc": "application/msword",
+            "imagen": "image/jpeg"
+        }
+        
+        mime_type = mime_types.get(tipo_archivo, "application/octet-stream")
+        
+        href = f'''
+        <a href="data:{mime_type};base64,{b64}" download="{nombre_archivo}" 
+           style="background-color: #4CAF50; color: white; padding: 8px 12px; 
+                  text-decoration: none; border-radius: 5px; display: inline-block;
+                  font-weight: bold; font-size: 0.8rem;">
+           📥 Descargar
+        </a>
+        '''
+        return href
+    except Exception as e:
+        return f"❌ Error: {e}"
+
+def buscar_documentos(db, criterio_busqueda, tipo_busqueda, filtros_adicionales=None):
+    try:
+        query = {}
+        
+        # Mapeo de tipos de búsqueda
+        busqueda_map = {
+            "nombre": "titulo",
+            "autor": "autor",
+            "contenido": "contenido",
+            "tags": "tags",
+            "categoria": "categoria",
+            "ci": "ci",
+            "descripcion": "descripcion",
+            "usuario": "usuario_creacion"
+        }
+        
+        campo = busqueda_map.get(tipo_busqueda)
+        if campo:
+            if tipo_busqueda == "tags":
+                query[campo] = {"$in": [criterio_busqueda.strip()]}
+            else:
+                query[campo] = {"$regex": criterio_busqueda, "$options": "i"}
+        
+        # Aplicar filtros adicionales
+        if filtros_adicionales:
+            query.update(filtros_adicionales)
+        
+        documentos = list(db.documentos.find(query).sort("fecha_creacion", -1))
+        return documentos, None
+        
+    except Exception as e:
+        return None, str(e)
+
+def mostrar_documento_compacto(doc, key_suffix=""):
+    """Muestra un documento en formato compacto y profesional"""
+    
+    iconos = {
+        "pdf": "📄",
+        "word": "📝", 
+        "texto": "📃",
+        "imagen": "🖼️"
+    }
+    
+    icono = iconos.get(doc.get('tipo'), '📎')
+    doc_id = str(doc['_id'])
+    
+    # Crear tarjeta compacta
+    with st.container():
+        st.markdown(f'<div class="document-card">', unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([5, 1])
+        
+        with col1:
+            # Header compacto
+            st.markdown(f"**{icono} {doc['titulo']}**")
+            
+            # Metadatos en línea compacta
+            meta_col1, meta_col2, meta_col3 = st.columns(3)
+            with meta_col1:
+                st.markdown(f'<div class="compact-metadata">👤 **Autor:** {doc["autor"]}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="compact-metadata">📂 **Categoría:** {doc["categoria"]}</div>', unsafe_allow_html=True)
+            with meta_col2:
+                st.markdown(f'<div class="compact-metadata">🔢 **CI:** {doc.get("ci", "N/A")}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="compact-metadata">🔄 **Versión:** {doc["version"]}</div>', unsafe_allow_html=True)
+            with meta_col3:
+                st.markdown(f'<div class="compact-metadata">📅 **Creado:** {doc["fecha_creacion"].strftime("%d/%m/%Y")}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="compact-metadata">👥 **Por:** {doc.get("usuario_creacion", "N/A")}</div>', unsafe_allow_html=True)
+            
+            # Información de almacenamiento
+            if doc.get('almacenamiento') == 'local':
+                st.markdown(f'<div class="compact-metadata">💾 **Almacenamiento:** Local ({doc.get("ruta_local", "N/A")})</div>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="compact-metadata">💾 **Almacenamiento:** Base de datos</div>', unsafe_allow_html=True)
+            
+            if doc.get('fecha_actualizacion') and doc.get('usuario_actualizacion'):
+                st.markdown(f'<div class="compact-metadata">✏️ **Actualizado:** {doc["fecha_actualizacion"].strftime("%d/%m/%Y")} por {doc["usuario_actualizacion"]}</div>', unsafe_allow_html=True)
+            
+            # Tags compactos
+            if doc.get('tags'):
+                tags_html = " ".join([f'<span class="tag">{tag}</span>' for tag in doc['tags']])
+                st.markdown(f'<div class="compact-metadata">🏷️ **Tags:** {tags_html}</div>', unsafe_allow_html=True)
+            
+            # Información específica del tipo
+            if doc.get('tipo') == 'texto':
+                contenido_preview = doc['contenido'][:100] + "..." if len(doc['contenido']) > 100 else doc['contenido']
+                st.markdown(f'<div class="compact-metadata">📝 **Contenido:** {contenido_preview}</div>', unsafe_allow_html=True)
+            elif doc.get('tipo') in ['pdf', 'word']:
+                st.markdown(f'<div class="compact-metadata">📋 **Archivo:** {doc.get("nombre_archivo", "N/A")}</div>', unsafe_allow_html=True)
+                if doc.get('tamaño_bytes'):
+                    tamaño_mb = doc['tamaño_bytes'] / (1024 * 1024)
+                    st.markdown(f'<div class="compact-metadata">💾 **Tamaño:** {tamaño_mb:.2f} MB</div>', unsafe_allow_html=True)
+                
+                # Botón de descarga solo para archivos en base de datos
+                if doc.get('contenido_binario') and doc.get('almacenamiento') != 'local':
+                    boton_descarga = crear_boton_descarga(
+                        doc['contenido_binario'],
+                        doc['nombre_archivo'],
+                        doc['tipo']
+                    )
+                    st.markdown(boton_descarga, unsafe_allow_html=True)
+                elif doc.get('almacenamiento') == 'local':
+                    st.markdown(f'<div class="compact-metadata">📍 **Archivo local:** No disponible para descarga directa</div>', unsafe_allow_html=True)
+            
+            # ID único (pequeño y discreto)
+            st.markdown(f'<div class="compact-metadata" style="font-size: 0.7rem; color: #999;">🆔 **ID:** {doc_id[:12]}...</div>', unsafe_allow_html=True)
+        
+        with col2:
+            # Botón de eliminar compacto
+            st.write("")  # Espacio
+            if st.button("🗑️", key=f"delete_{doc_id}_{key_suffix}", help="Eliminar documento", use_container_width=True):
+                with st.spinner("Eliminando..."):
+                    try:
+                        # Verificar que el documento existe antes de eliminar
+                        doc_existente = st.session_state.db_connection.documentos.find_one({"_id": doc["_id"]})
+                        if not doc_existente:
+                            st.error("❌ El documento ya no existe")
+                            return
+                        
+                        # Eliminar el documento
+                        result = st.session_state.db_connection.documentos.delete_one({"_id": doc["_id"]})
+                        
+                        if result.deleted_count > 0:
+                            st.success("✅ Documento eliminado")
+                            
+                            # ACTUALIZAR SESSION_STATE PARA INVALIDAR CACHE
+                            st.session_state.last_delete_time = datetime.now().timestamp()
+                            st.session_state.refresh_counter += 1
+                            
+                            # Esperar y recargar
+                            time.sleep(1.5)
+                            st.rerun()
+                        else:
+                            st.error("❌ No se pudo eliminar")
+                            
+                    except Exception as e:
+                        st.error(f"❌ Error: {str(e)}")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+
+def crear_formulario_documento(tipo_documento, tab_key):
+    """Crea un formulario reutilizable para diferentes tipos de documentos"""
+    
+    with st.form(f"form_{tipo_documento}_{tab_key}", clear_on_submit=True):
+        st.markdown(f"### 📝 Información del Documento")
+        
+        # Mostrar usuario actual que realizará la acción
+        st.info(f"**Usuario de BD:** 👤 {st.session_state.mongo_username}")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            titulo = st.text_input(
+                "**Título del documento** *",
+                placeholder=f"Ej: Manual de Usuario {tipo_documento.upper()}",
+                help="Nombre descriptivo del documento",
+                key=f"titulo_{tipo_documento}_{tab_key}"
+            )
+            categoria = st.selectbox(
+                "**Categoría** *",
+                ["Técnica", "Usuario", "API", "Tutorial", "prueba", "Procedimiento", "Política", "Otros"],
+                help="Categoría principal del documento",
+                key=f"categoria_{tipo_documento}_{tab_key}"
+            )
+            autor = st.text_input(
+                "**Autor** *",
+                placeholder="Nombre completo del autor",
+                help="Persona responsable del documento",
+                key=f"autor_{tipo_documento}_{tab_key}"
+            )
+            
+        with col2:
+            ci = st.text_input(
+                "**CI/Cédula** *",
+                placeholder="Número de identificación",
+                help="Cédula de identidad del autor",
+                key=f"ci_{tipo_documento}_{tab_key}"
+            )
+            version = st.text_input(
+                "**Versión**",
+                value="1.0",
+                placeholder="Ej: 1.2.3",
+                help="Versión del documento",
+                key=f"version_{tipo_documento}_{tab_key}"
+            )
+            tags_input = st.text_input(
+                "**Etiquetas**",
+                placeholder="tecnico,manual,instalacion",
+                help="Separar con comas",
+                key=f"tags_{tipo_documento}_{tab_key}"
+            )
+            prioridad = st.select_slider(
+                "**Prioridad**",
+                options=["Baja", "Media", "Alta"],
+                value="Media",
+                help="Nivel de prioridad del documento",
+                key=f"prioridad_{tipo_documento}_{tab_key}"
+            )
+        
+        # Campos específicos por tipo
+        if tipo_documento == "texto":
+            contenido = st.text_area(
+                "**Contenido del documento** *",
+                height=200,
+                placeholder="Escribe el contenido completo del documento aquí...",
+                help="Contenido principal en formato texto",
+                key=f"contenido_{tipo_documento}_{tab_key}"
+            )
+        else:
+            archivo = st.file_uploader(
+                f"**Seleccionar archivo {tipo_documento.upper()}** *",
+                type=[tipo_documento] if tipo_documento != 'word' else ['docx', 'doc'],
+                help=f"Sube tu archivo {tipo_documento.upper()}",
+                key=f"archivo_{tipo_documento}_{tab_key}"
+            )
+            descripcion = st.text_area(
+                "**Descripción del documento**",
+                height=80,
+                placeholder="Breve descripción del contenido del archivo...",
+                help="Resumen del contenido del documento",
+                key=f"descripcion_{tipo_documento}_{tab_key}"
+            )
+        
+        submitted = st.form_submit_button(
+            f"💾 Guardar Documento {tipo_documento.upper()}",
+            use_container_width=True,
+            key=f"submit_{tipo_documento}_{tab_key}"
+        )
+        
+        if submitted:
+            return validar_y_guardar_documento(tipo_documento, locals())
+    
+    return False
+
+def validar_y_guardar_documento(tipo_documento, variables_locales):
+    """Valida y guarda el documento en la base de datos"""
+    
+    # Extraer variables del contexto local
+    titulo = variables_locales['titulo']
+    autor = variables_locales['autor']
+    ci = variables_locales['ci']
+    
+    if not all([titulo, autor, ci]):
+        st.warning("⚠️ Completa los campos obligatorios (*)")
+        return False
+    
+    if tipo_documento == "texto":
+        if not variables_locales['contenido']:
+            st.warning("⚠️ El contenido del documento es obligatorio")
+            return False
+    else:
+        if not variables_locales['archivo']:
+            st.warning("⚠️ Debes seleccionar un archivo")
+            return False
+    
+    # Preparar documento
+    documento = {
+        "titulo": titulo,
+        "categoria": variables_locales['categoria'],
+        "autor": autor,
+        "ci": ci,
+        "version": variables_locales['version'],
+        "tags": [tag.strip() for tag in variables_locales['tags_input'].split(",")] if variables_locales['tags_input'] else [],
+        "prioridad": variables_locales['prioridad'],
+        "tipo": tipo_documento,
+        "fecha_creacion": datetime.utcnow(),
+        "fecha_actualizacion": datetime.utcnow(),
+        "usuario_creacion": st.session_state.mongo_username,
+        "usuario_actualizacion": st.session_state.mongo_username,
+        "almacenamiento": "base_datos"  # Para documentos subidos directamente
+    }
+    
+    if tipo_documento == "texto":
+        documento["contenido"] = variables_locales['contenido']
+    else:
+        archivo = variables_locales['archivo']
+        contenido_binario, tamaño, error = procesar_archivo(archivo, tipo_documento)
+        
+        if error:
+            st.error(f"❌ {error}")
+            return False
+            
+        documento.update({
+            "descripcion": variables_locales['descripcion'],
+            "nombre_archivo": archivo.name,
+            "contenido_binario": contenido_binario,
+            "tamaño_bytes": tamaño
+        })
+    
+    try:
+        result = st.session_state.db_connection.documentos.insert_one(documento)
+        st.success(f"✅ Documento '{titulo}' guardado exitosamente por {st.session_state.mongo_username}!")
+        st.balloons()
+        
+        # Actualizar timestamp para refrescar estadísticas
+        st.session_state.last_delete_time = datetime.now().timestamp()
+        return True
+    except Exception as e:
+        st.error(f"❌ Error al guardar: {str(e)}")
+        return False
+
+# --- FUNCIONES PARA CSV ---
+
+def cargar_y_validar_csv(archivo_csv, nombre_funcionalidad="carga"):
+    """Carga y valida un archivo CSV con manejo de errores mejorado"""
+    try:
+        # Verificar que el archivo no esté vacío
+        if archivo_csv.size == 0:
+            return None, "El archivo CSV está vacío"
+        
+        # Guardar la posición actual del archivo
+        current_position = archivo_csv.tell()
+        
+        # Intentar leer el CSV con diferentes enfoques
+        df = None
+        error_messages = []
+        
+        # Método 1: Leer normalmente
+        try:
+            archivo_csv.seek(current_position)
+            df = pd.read_csv(archivo_csv)
+            st.success("✅ CSV cargado con método estándar")
+        except Exception as e1:
+            error_messages.append(f"Método 1: {str(e1)}")
+            
+            # Método 2: Leer con diferentes separadores
+            try:
+                archivo_csv.seek(current_position)
+                df = pd.read_csv(archivo_csv, sep=None, engine='python')
+                st.success("✅ CSV cargado con detector de separadores")
+            except Exception as e2:
+                error_messages.append(f"Método 2: {str(e2)}")
+                
+                # Método 3: Leer con encoding específico
+                try:
+                    archivo_csv.seek(current_position)
+                    df = pd.read_csv(archivo_csv, encoding='latin-1')
+                    st.success("✅ CSV cargado con encoding latin-1")
+                except Exception as e3:
+                    error_messages.append(f"Método 3: {str(e3)}")
+                    
+                    # Método 4: Leer manualmente
+                    try:
+                        archivo_csv.seek(current_position)
+                        content = archivo_csv.read().decode('utf-8')
+                        lines = content.strip().split('\n')
+                        
+                        # Verificar que hay al menos una línea
+                        if len(lines) == 0:
+                            return None, "El archivo está vacío"
+                            
+                        # Procesar manualmente
+                        headers = lines[0].split('\t') if '\t' in lines[0] else lines[0].split(',')
+                        data = []
+                        
+                        for line in lines[1:]:
+                            if line.strip():  # Saltar líneas vacías
+                                values = line.split('\t') if '\t' in line else line.split(',')
+                                data.append(values)
+                        
+                        df = pd.DataFrame(data, columns=headers)
+                        st.success("✅ CSV cargado con procesamiento manual")
+                        
+                    except Exception as e4:
+                        error_messages.append(f"Método 4: {str(e4)}")
+                        return None, f"No se pudo leer el CSV. Errores: {' | '.join(error_messages)}"
+        
+        # Verificar que se cargó algún DataFrame
+        if df is None:
+            return None, "No se pudo cargar el CSV con ningún método"
+        
+        # Validar que el DataFrame no esté vacío
+        if df.empty:
+            return None, "El archivo CSV no contiene filas de datos"
+        
+        # Validar que tenga columnas
+        if len(df.columns) == 0:
+            return None, "El archivo CSV no tiene columnas identificables"
+        
+        # Limpiar nombres de columnas (eliminar espacios extras)
+        df.columns = df.columns.str.strip()
+        
+        # Mostrar información del CSV cargado
+        st.success(f"✅ CSV cargado exitosamente: {len(df)} registros, {len(df.columns)} columnas")
+        
+        # Mostrar preview del CSV
+        with st.expander("📊 Vista previa del CSV cargado", expanded=True):
+            st.write("**Primeras 5 filas:**")
+            st.dataframe(df.head(), use_container_width=True)
+            
+            st.write("**Información de columnas:**")
+            col_info = pd.DataFrame({
+                'Columna': df.columns,
+                'Tipo': df.dtypes.values,
+                'No nulos': df.notna().sum().values,
+                'Ejemplo': df.iloc[0].values if len(df) > 0 else ['N/A'] * len(df.columns)
+            })
+            st.dataframe(col_info, use_container_width=True)
+        
+        # Validar estructura específica
+        errores = validar_csv_metadatos(df)
+        if errores:
+            return None, " | ".join(errores)
+        
+        return df, None
+        
+    except Exception as e:
+        return None, f"Error inesperado al procesar el CSV: {str(e)}"
 
 def crear_plantilla_carga_masiva():
     """Crea y descarga plantilla CSV para carga masiva"""
@@ -1145,17 +1178,111 @@ def crear_plantilla_carga_masiva():
     '''
     st.markdown(href, unsafe_allow_html=True)
 
+# --- SIDEBAR MEJORADO ---
+
+with st.sidebar:
+    st.markdown("## 🔐 Configuración")
+    
+    # Logo o imagen de la empresa
+    st.image("https://cdn-icons-png.flaticon.com/512/2721/2721264.png", width=80)
+    
+    # Mostrar información del usuario actual
+    st.markdown("### 👤 Usuario de Base de Datos")
+    st.markdown(f'<div class="user-badge">👤 {st.session_state.mongo_username}</div>', unsafe_allow_html=True)
+    st.write(f"**Estado:** {st.session_state.current_user}")
+    
+    mongo_uri = st.text_input(
+        "**Cadena de Conexión MongoDB**",
+        type="password",
+        placeholder="mongodb+srv://usuario:contraseña@cluster...",
+        help="Ingresa tu URI de conexión a MongoDB Atlas",
+        key="mongo_uri_input"
+    )
+    
+    # Botón para conectar/desconectar
+    col_conn1, col_conn2 = st.columns(2)
+    with col_conn1:
+        connect_btn = st.button("🔗 Conectar", use_container_width=True, key="connect_btn")
+    with col_conn2:
+        disconnect_btn = st.button("🔓 Desconectar", use_container_width=True, key="disconnect_btn")
+    
+    if disconnect_btn:
+        st.session_state.db_connection = None
+        st.session_state.db_connected = False
+        st.session_state.current_user = "No conectado"
+        st.session_state.mongo_username = "Desconocido"
+        st.session_state.last_delete_time = datetime.now().timestamp()
+        st.success("🔓 Desconectado de la base de datos")
+        st.rerun()
+    
+    if connect_btn and mongo_uri:
+        with st.spinner("Conectando a MongoDB..."):
+            db, connected, message, username = connect_mongodb(mongo_uri)
+            if connected:
+                st.session_state.db_connection = db
+                st.session_state.db_connected = True
+                st.session_state.current_user = "Conectado"
+                st.session_state.mongo_username = username
+                st.session_state.last_delete_time = datetime.now().timestamp()
+                st.success(f"✅ {message}")
+            else:
+                st.error(f"❌ {message}")
+    
+    # Mostrar estadísticas si hay conexión
+    if st.session_state.db_connected:
+        st.success(f"✅ Conexión activa | 👤 {st.session_state.mongo_username}")
+        st.markdown("---")
+        
+        try:
+            db = st.session_state.db_connection
+            
+            total_docs = db.documentos.count_documents({})
+            pdf_count = db.documentos.count_documents({"tipo": "pdf"})
+            word_count = db.documentos.count_documents({"tipo": "word"})
+            text_count = db.documentos.count_documents({"tipo": "texto"})
+            image_count = db.documentos.count_documents({"tipo": "imagen"})
+            local_count = db.documentos.count_documents({"almacenamiento": "local"})
+            usuarios_activos = db.documentos.distinct("usuario_creacion")
+            
+            st.markdown("### 📊 Estadísticas")
+            
+            # Métricas principales
+            st.metric("📄 Total Documentos", total_docs)
+            
+            # Estadísticas por tipo
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("📝 Texto", text_count)
+                st.metric("📄 PDF", pdf_count)
+            with col2:
+                st.metric("📋 Word", word_count)
+                st.metric("🖼️ Imágenes", image_count)
+            
+            # Estadísticas adicionales
+            st.metric("👥 Usuarios Activos", len(usuarios_activos))
+            st.metric("💾 Archivos Locales", local_count)
+                
+        except Exception as e:
+            st.error(f"❌ Error obteniendo estadísticas: {str(e)}")
+            st.session_state.db_connection = None
+            st.session_state.db_connected = False
+    
+    elif mongo_uri and not st.session_state.db_connected:
+        st.warning("⚠️ Presiona 'Conectar' para establecer la conexión")
+    else:
+        st.info("👈 Ingresa la cadena de conexión MongoDB")
+
 # --- APLICACIÓN PRINCIPAL ---
 
 if st.session_state.db_connected and st.session_state.db_connection is not None:
     db = st.session_state.db_connection
-    st.success(f"🚀 Conectado a la base de datos | 👤 Usuario: {st.session_state.current_user}")
+    st.success(f"🚀 Conectado a la base de datos | 👤 Usuario: {st.session_state.mongo_username}")
     
     # --- PESTAÑAS REORGANIZADAS ---
     st.markdown("---")
     st.markdown("## 📁 Gestión de Documentos")
     
-    # NUEVA ORGANIZACIÓN DE PESTAÑAS
+    # ORGANIZACIÓN DE PESTAÑAS
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "🔍 Buscar Documentos", 
         "📝 Crear Texto", 
@@ -1312,12 +1439,13 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
     # PESTAÑA 6: Carga Masiva por CI
     with tab6:
         st.markdown("### 🚀 Carga Masiva de Archivos")
-        st.info("""
+        st.info(f"""
         **Carga masiva de documentos organizados por carpetas de CI**
         - Estructura: `C:/ruta/carpetas/CI/archivos.pdf`
         - Soporta: PDF, Word, imágenes, texto
         - Metadatos automáticos desde CSV
         - Hasta 10,000 documentos por carga
+        - **Usuario de BD:** 👤 {st.session_state.mongo_username}
         """)
         
         # Configuración en dos columnas
@@ -1400,22 +1528,13 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         # Previsualización del CSV
         if archivo_csv:
             try:
-                df_metadatos = pd.read_csv(archivo_csv)
-                st.success(f"✅ CSV cargado: {len(df_metadatos)} registros de CI encontrados")
+                df_metadatos, error_csv = cargar_y_validar_csv(archivo_csv, "carga masiva")
                 
-                with st.expander("📊 Vista previa del CSV", expanded=True):
-                    st.dataframe(df_metadatos.head(10), use_container_width=True)
+                if error_csv:
+                    st.error(f"❌ Error en el CSV: {error_csv}")
+                else:
+                    st.success(f"✅ CSV cargado: {len(df_metadatos)} registros de CI encontrados")
                     
-                    # Estadísticas del CSV
-                    col_stats1, col_stats2, col_stats3 = st.columns(3)
-                    with col_stats1:
-                        st.metric("Total CIs", len(df_metadatos))
-                    with col_stats2:
-                        st.metric("Columnas", len(df_metadatos.columns))
-                    with col_stats3:
-                        cis_unicos = df_metadatos['ci'].nunique() if 'ci' in df_metadatos.columns else 0
-                        st.metric("CIs Únicos", cis_unicos)
-            
             except Exception as e:
                 st.error(f"❌ Error al leer el CSV: {str(e)}")
         
@@ -1437,14 +1556,14 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
             else:
                 # Validar estructura del CSV
                 try:
-                    df_metadatos = pd.read_csv(archivo_csv)
-                    errores = validar_csv_metadatos(df_metadatos)
+                    df_metadatos, error_csv = cargar_y_validar_csv(archivo_csv, "carga masiva")
                     
-                    if errores:
-                        st.error("❌ Errores en el CSV:")
-                        for error in errores:
-                            st.write(f"• {error}")
+                    if error_csv:
+                        st.error(f"❌ Error en el CSV: {error_csv}")
                     else:
+                        # Mostrar resumen antes de procesar
+                        st.info(f"📋 **Resumen a procesar:** {len(df_metadatos)} documentos de {df_metadatos['ci'].nunique()} CIs diferentes")
+                        
                         # Procesar carga masiva
                         with st.spinner("🔄 Iniciando procesamiento masivo..."):
                             resultado = procesar_carga_masiva_ci(
@@ -1461,7 +1580,7 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                 except Exception as e:
                     st.error(f"❌ Error en validación: {str(e)}")
 
-    # PESTAÑA 7: Carga Masiva con Archivos Locales (COMPLETAMENTE IMPLEMENTADA)
+    # PESTAÑA 7: Carga Masiva con Archivos Locales
     with tab7:
         st.markdown("### 💾 Carga Masiva Local (Archivos en Sistema)")
         st.info(f"""
@@ -1470,7 +1589,7 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         - Solo los metadatos se almacenan en MongoDB
         - Soporta: PDF, Word, imágenes, texto
         - Hasta 10,000 documentos por carga
-        - **Usuario actual:** 👤 {st.session_state.current_user}
+        - **Usuario de BD:** 👤 {st.session_state.mongo_username}
         """)
         
         # Configuración en dos columnas
@@ -1558,22 +1677,13 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         # Previsualización del CSV
         if archivo_csv_local:
             try:
-                df_metadatos_local = pd.read_csv(archivo_csv_local)
-                st.success(f"✅ CSV cargado: {len(df_metadatos_local)} registros de CI encontrados")
+                df_metadatos_local, error_csv = cargar_y_validar_csv(archivo_csv_local, "carga local")
                 
-                with st.expander("📊 Vista previa del CSV", expanded=True):
-                    st.dataframe(df_metadatos_local.head(10), use_container_width=True)
+                if error_csv:
+                    st.error(f"❌ Error en el CSV: {error_csv}")
+                else:
+                    st.success(f"✅ CSV cargado: {len(df_metadatos_local)} registros de CI encontrados")
                     
-                    # Estadísticas del CSV
-                    col_stats1, col_stats2, col_stats3 = st.columns(3)
-                    with col_stats1:
-                        st.metric("Total CIs", len(df_metadatos_local))
-                    with col_stats2:
-                        st.metric("Columnas", len(df_metadatos_local.columns))
-                    with col_stats3:
-                        cis_unicos = df_metadatos_local['ci'].nunique() if 'ci' in df_metadatos_local.columns else 0
-                        st.metric("CIs Únicos", cis_unicos)
-            
             except Exception as e:
                 st.error(f"❌ Error al leer el CSV: {str(e)}")
         
@@ -1590,19 +1700,19 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
             else:
                 # Validar estructura del CSV
                 try:
-                    df_metadatos_local = pd.read_csv(archivo_csv_local)
-                    errores = validar_csv_metadatos(df_metadatos_local)
+                    df_metadatos_local, error_csv = cargar_y_validar_csv(archivo_csv_local, "carga local")
                     
-                    if errores:
-                        st.error("❌ Errores en el CSV:")
-                        for error in errores:
-                            st.write(f"• {error}")
+                    if error_csv:
+                        st.error(f"❌ Error en el CSV: {error_csv}")
                     else:
                         # Verificar que la ruta existe
                         ruta_path = Path(ruta_base_local)
                         if not ruta_path.exists():
                             st.error(f"❌ La ruta especificada no existe: {ruta_base_local}")
                         else:
+                            # Mostrar resumen antes de procesar
+                            st.info(f"📋 **Resumen a procesar:** {len(df_metadatos_local)} registros de {df_metadatos_local['ci'].nunique()} CIs diferentes")
+                            
                             # Procesar carga local
                             with st.spinner("🔄 Iniciando procesamiento local..."):
                                 resultado = procesar_carga_local(
