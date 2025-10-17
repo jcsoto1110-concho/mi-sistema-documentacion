@@ -1724,8 +1724,7 @@ with tab7:
             
             except Exception as e:
                 st.error(f"❌ Error al leer el CSV: {str(e)}")
-        
-        # Botón de procesamiento - USAR EL DATAFRAME DEL SESSION_STATE
+                # Botón de procesamiento - USAR EL DATAFRAME DEL SESSION_STATE
         st.markdown("#### ⚡ Procesamiento Local")
         
         if st.button("🚀 Iniciar Carga Local", type="primary", use_container_width=True, key="btn_carga_local_tab7"):
@@ -1760,6 +1759,7 @@ with tab7:
                             sobrescribir_existentes=sobrescribir_existentes_local
                         )
 
+# ESTE "else" DEBE ESTAR FUERA DE TODAS LAS PESTAÑAS
 else:
     st.info("👈 Configura la conexión a MongoDB en la barra lateral para comenzar")
 
@@ -1771,11 +1771,3 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
-
-
-
-
-
-
-
-
