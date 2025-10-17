@@ -26,8 +26,10 @@ if 'refresh_counter' not in st.session_state:
     st.session_state.refresh_counter = 0
 if 'db_connection' not in st.session_state:
     st.session_state.db_connection = None
-if 'db_connected' not in st.session_state:  # NUEVO: bandera de conexión
+if 'db_connected' not in st.session_state:
     st.session_state.db_connected = False
+if 'current_user' not in st.session_state:  # NUEVO: usuario actual
+    st.session_state.current_user = "Invitado"
 
 # CSS personalizado para mejorar la apariencia
 st.markdown("""
@@ -109,6 +111,16 @@ st.markdown("""
         display: inline-block;
         font-size: 0.75rem;
     }
+    .user-badge {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-weight: bold;
+        font-size: 0.9rem;
+        display: inline-block;
+        margin-bottom: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -137,6 +149,23 @@ with st.sidebar:
     # Logo o imagen de la empresa
     st.image("https://cdn-icons-png.flaticon.com/512/2721/2721264.png", width=80)
     
+    # NUEVO: Selección de usuario
+    st.markdown("### 👤 Usuario Actual")
+    usuario_actual = st.selectbox(
+        "Selecciona tu usuario:",
+        ["Invitado", "Admin", "Usuario1", "Usuario2", "Editor", "Revisor"],
+        help="Selecciona tu identidad para registrar tus acciones",
+        key="user_selection"
+    )
+    
+    # Actualizar usuario en session_state
+    if usuario_actual != st.session_state.current_user:
+        st.session_state.current_user = usuario_actual
+        st.rerun()
+    
+    # Mostrar badge del usuario actual
+    st.markdown(f'<div class="user-badge">👤 {st.session_state.current_user}</div>', unsafe_allow_html=True)
+    
     mongo_uri = st.text_input(
         "**Cadena de Conexión MongoDB**",
         type="password",
@@ -154,7 +183,8 @@ with st.sidebar:
     
     if disconnect_btn:
         st.session_state.db_connection = None
-        st.session_state.db_connected = False  # NUEVO: actualizar bandera
+        st.session_state.db_connected = False
+        st.session_state.current_user = "Invitado"  # Resetear usuario
         st.session_state.last_delete_time = datetime.now().timestamp()
         st.success("🔓 Desconectado de la base de datos")
         st.rerun()
@@ -164,15 +194,16 @@ with st.sidebar:
             db, connected, message = connect_mongodb(mongo_uri)
             if connected:
                 st.session_state.db_connection = db
-                st.session_state.db_connected = True  # NUEVO: actualizar bandera
+                st.session_state.db_connected = True
                 st.session_state.last_delete_time = datetime.now().timestamp()
                 st.success(f"✅ {message}")
             else:
                 st.error(f"❌ {message}")
     
     # Mostrar estadísticas si hay conexión
-    if st.session_state.db_connected:  # CAMBIADO: usar la bandera en lugar del objeto
-        st.success("✅ Conexión activa")
+    if st.session_state.db_connected:
+        # NUEVO: Mostrar usuario conectado en el mensaje de conexión
+        st.success(f"✅ Conexión activa | 👤 {st.session_state.current_user}")
         st.markdown("---")
         
         try:
@@ -187,6 +218,9 @@ with st.sidebar:
             text_count = db.documentos.count_documents({"tipo": "texto"})
             image_count = db.documentos.count_documents({"tipo": "imagen"})
             
+            # NUEVO: Estadísticas de usuarios
+            usuarios_activos = db.documentos.distinct("usuario_creacion")
+            
             st.markdown("### 📊 Estadísticas")
             
             # Métricas principales
@@ -200,13 +234,16 @@ with st.sidebar:
             with col2:
                 st.metric("📋 Word", word_count)
                 st.metric("🖼️ Imágenes", image_count)
+            
+            # NUEVO: Estadísticas de usuarios
+            st.metric("👥 Usuarios Activos", len(usuarios_activos))
                 
         except Exception as e:
             st.error(f"❌ Error obteniendo estadísticas: {str(e)}")
             st.session_state.db_connection = None
-            st.session_state.db_connected = False  # NUEVO: actualizar bandera
+            st.session_state.db_connected = False
     
-    elif mongo_uri and not st.session_state.db_connected:  # CAMBIADO: usar la bandera
+    elif mongo_uri and not st.session_state.db_connected:
         st.warning("⚠️ Presiona 'Conectar' para establecer la conexión")
     else:
         st.info("👈 Ingresa la cadena de conexión MongoDB")
@@ -259,7 +296,8 @@ def buscar_documentos(db, criterio_busqueda, tipo_busqueda, filtros_adicionales=
             "tags": "tags",
             "categoria": "categoria",
             "ci": "ci",
-            "descripcion": "descripcion"
+            "descripcion": "descripcion",
+            "usuario": "usuario_creacion"  # NUEVO: búsqueda por usuario
         }
         
         campo = busqueda_map.get(tipo_busqueda)
@@ -315,8 +353,13 @@ def mostrar_documento_compacto(doc, key_suffix=""):
                 st.markdown(f'<div class="compact-metadata">🔢 **CI:** {doc.get("ci", "N/A")}</div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="compact-metadata">🔄 **Versión:** {doc["version"]}</div>', unsafe_allow_html=True)
             with meta_col3:
-                st.markdown(f'<div class="compact-metadata">📅 **Fecha:** {doc["fecha_creacion"].strftime("%d/%m/%Y")}</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="compact-metadata">⚡ **Prioridad:** {doc["prioridad"]}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="compact-metadata">📅 **Creado:** {doc["fecha_creacion"].strftime("%d/%m/%Y")}</div>', unsafe_allow_html=True)
+                # NUEVO: Mostrar usuario que creó el documento
+                st.markdown(f'<div class="compact-metadata">👥 **Por:** {doc.get("usuario_creacion", "N/A")}</div>', unsafe_allow_html=True)
+            
+            # NUEVO: Mostrar información de actualización si existe
+            if doc.get('fecha_actualizacion') and doc.get('usuario_actualizacion'):
+                st.markdown(f'<div class="compact-metadata">✏️ **Actualizado:** {doc["fecha_actualizacion"].strftime("%d/%m/%Y")} por {doc["usuario_actualizacion"]}</div>', unsafe_allow_html=True)
             
             # Tags compactos
             if doc.get('tags'):
@@ -384,6 +427,9 @@ def crear_formulario_documento(tipo_documento, tab_key):
     
     with st.form(f"form_{tipo_documento}_{tab_key}", clear_on_submit=True):
         st.markdown(f"### 📝 Información del Documento")
+        
+        # NUEVO: Mostrar usuario actual que realizará la acción
+        st.info(f"**Usuario actual:** 👤 {st.session_state.current_user}")
         
         col1, col2 = st.columns(2)
         
@@ -502,7 +548,10 @@ def validar_y_guardar_documento(tipo_documento, variables_locales):
         "prioridad": variables_locales['prioridad'],
         "tipo": tipo_documento,
         "fecha_creacion": datetime.utcnow(),
-        "fecha_actualizacion": datetime.utcnow()
+        "fecha_actualizacion": datetime.utcnow(),
+        # NUEVO: Campos de usuario
+        "usuario_creacion": st.session_state.current_user,
+        "usuario_actualizacion": st.session_state.current_user
     }
     
     if tipo_documento == "texto":
@@ -524,7 +573,7 @@ def validar_y_guardar_documento(tipo_documento, variables_locales):
     
     try:
         result = st.session_state.db_connection.documentos.insert_one(documento)
-        st.success(f"✅ Documento '{titulo}' guardado exitosamente!")
+        st.success(f"✅ Documento '{titulo}' guardado exitosamente por {st.session_state.current_user}!")
         st.balloons()
         
         # Actualizar timestamp para refrescar estadísticas
@@ -630,6 +679,9 @@ def procesar_archivo_masivo(archivo_path, ci, metadatos_ci, config):
             "ruta_original": str(archivo_path),
             "fecha_creacion": datetime.utcnow(),
             "fecha_actualizacion": datetime.utcnow(),
+            # NUEVO: Campos de usuario para carga masiva
+            "usuario_creacion": st.session_state.current_user,
+            "usuario_actualizacion": st.session_state.current_user,
             "procesado_masivo": True,
             "lote_carga": config.get('lote_id')
         }
@@ -759,7 +811,7 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
                 st.metric("CIs Procesados", cis_procesados)
             
             if documentos_exitosos > 0:
-                st.success(f"🎉 Carga masiva completada! {documentos_exitosos} documentos procesados exitosamente.")
+                st.success(f"🎉 Carga masiva completada por {st.session_state.current_user}! {documentos_exitosos} documentos procesados exitosamente.")
                 st.balloons()
                 
                 # Actualizar estadísticas
@@ -814,10 +866,10 @@ def crear_plantilla_carga_masiva():
 
 # --- APLICACIÓN PRINCIPAL ---
 
-# CAMBIAR ESTA LÍNEA: usar st.session_state.db_connected en lugar de st.session_state.db_connection
 if st.session_state.db_connected and st.session_state.db_connection is not None:
     db = st.session_state.db_connection
-    st.success("🚀 Conectado a la base de datos")
+    # NUEVO: Mostrar usuario en el mensaje de conexión principal
+    st.success(f"🚀 Conectado a la base de datos | 👤 Usuario: {st.session_state.current_user}")
     
     # --- PESTAÑAS REORGANIZADAS ---
     st.markdown("---")
@@ -851,7 +903,7 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
             with col2:
                 tipo_busqueda = st.selectbox(
                     "**Buscar por:**",
-                    ["nombre", "autor", "contenido", "tags", "categoria", "ci", "descripcion"],
+                    ["nombre", "autor", "contenido", "tags", "categoria", "ci", "descripcion", "usuario"],
                     format_func=lambda x: {
                         "nombre": "📄 Nombre del documento",
                         "autor": "👤 Autor", 
@@ -859,7 +911,8 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                         "tags": "🏷️ Etiquetas",
                         "categoria": "📂 Categoría",
                         "ci": "🔢 CI/Cédula",
-                        "descripcion": "📋 Descripción"
+                        "descripcion": "📋 Descripción",
+                        "usuario": "👥 Usuario creador"  # NUEVO: opción de búsqueda por usuario
                     }[x],
                     key="tipo_busqueda_tab1"
                 )
@@ -959,7 +1012,8 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
             query["$or"] = [
                 {"titulo": {"$regex": busqueda_rapida, "$options": "i"}},
                 {"ci": {"$regex": busqueda_rapida, "$options": "i"}},
-                {"autor": {"$regex": busqueda_rapida, "$options": "i"}}
+                {"autor": {"$regex": busqueda_rapida, "$options": "i"}},
+                {"usuario_creacion": {"$regex": busqueda_rapida, "$options": "i"}}  # NUEVO: búsqueda por usuario
             ]
         
         try:
@@ -984,12 +1038,13 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
     # PESTAÑA 6: Carga Masiva por CI
     with tab6:
         st.markdown("### 🚀 Carga Masiva de Archivos")
-        st.info("""
+        st.info(f"""
         **Carga masiva de documentos organizados por carpetas de CI**
         - Estructura: `C:/ruta/carpetas/CI/archivos.pdf`
         - Soporta: PDF, Word, imágenes, texto
         - Metadatos automáticos desde CSV
         - Hasta 10,000 documentos por carga
+        - **Usuario actual:** 👤 {st.session_state.current_user}
         """)
         
         # Configuración en dos columnas
@@ -1136,12 +1191,13 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
     # PESTAÑA 7: Carga Masiva con Archivos Locales
     with tab7:
         st.markdown("### 💾 Carga Masiva (Archivos Locales)")
-        st.info("""
+        st.info(f"""
         **Carga masiva manteniendo archivos en sistema local**
         - Estructura: `C:/subir_archivos/archivos_con_CI_en_nombre.pdf`
         - Solo metadatos en MongoDB, archivos permanecen en carpeta local
         - Soporta: PDF, Word, imágenes, texto
         - Hasta 10,000 documentos por carga
+        - **Usuario actual:** 👤 {st.session_state.current_user}
         """)
         
         # Configuración simplificada
