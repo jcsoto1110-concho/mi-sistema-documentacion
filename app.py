@@ -1590,15 +1590,33 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         # Configuración en dos columnas
         col_config1, col_config2 = st.columns(2)
         
-        with col_config1:
-            st.markdown("#### 📁 Configuración de Carpetas")
-            ruta_base_local = st.text_input(
-                "**Ruta de carpeta de archivos** *",
-                value="C:\\temp\\subir_archivos",
-                placeholder="C:\\temp\\subir_archivos",
-                help="Ruta donde están todos los archivos (se buscará recursivamente)",
-                key="ruta_base_local_tab7"
-            )
+      with col_config1:
+    st.markdown("#### 📁 Configuración de Carpetas")
+    ruta_base_local = st.text_input(
+        "**Ruta de carpeta de archivos** *",
+        value="C:/temp/subir_archivos",
+        placeholder="C:/temp/subir_archivos",
+        help="Ruta donde están todos los archivos (se buscará recursivamente)",
+        key="ruta_base_local_tab7"
+    )
+    
+    # VERIFICACIÓN INMEDIATA
+    if ruta_base_local:
+        ruta_path = Path(ruta_base_local)
+        if ruta_path.exists():
+            st.success("✅ ✅ ✅ CARPETA ENCONTRADA - Lista para usar")
+            # Mostrar contenido
+            archivos = list(ruta_path.glob("*"))
+            if archivos:
+                st.info(f"📁 Archivos en la carpeta: {len(archivos)}")
+                for archivo in archivos[:3]:  # Mostrar primeros 3
+                    st.write(f"   📄 {archivo.name}")
+            else:
+                st.warning("📁 Carpeta vacía - Agrega algunos archivos")
+        else:
+            st.error("❌ Carpeta NO encontrada - Verifica la ruta")
+
+            
             
             tipos_archivo_local = st.multiselect(
                 "**Tipos de archivo a procesar** *",
@@ -1753,6 +1771,7 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
