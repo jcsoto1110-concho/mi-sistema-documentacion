@@ -269,29 +269,26 @@ def mostrar_documento(doc, key_suffix=""):
             # Botones de acción
             st.write("")  # Espacio
             
-            # SOLUCIÓN MEJORADA - Botón de eliminar
+            # SOLUCIÓN COMPLETA - Botón de eliminar
             if st.button("🗑️ Eliminar", key=f"delete_{doc['_id']}_{key_suffix}", use_container_width=True):
                 with st.spinner("Eliminando documento..."):
                     try:
-                        # Verificar que la conexión a la base de datos funciona
-                        db.command('ping')
-                        
                         # Intentar eliminar el documento
                         result = db.documentos.delete_one({"_id": doc["_id"]})
                         
                         if result.deleted_count > 0:
                             st.success("✅ Documento eliminado correctamente")
-                            # Forzar actualización inmediata
+                            # INVALIDAR CACHE Y FORZAR ACTUALIZACIÓN COMPLETA
+                            st.session_state.last_delete_time = datetime.now()
                             st.session_state.force_refresh = True
-                            time.sleep(1.5)
+                            time.sleep(2)
                             st.rerun()
                         else:
-                            st.error("❌ No se pudo eliminar el documento. Puede que ya haya sido eliminado.")
+                            st.error("❌ No se pudo eliminar el documento")
                             
                     except Exception as e:
-                        st.error(f"❌ Error al conectar con la base de datos: {str(e)}")
-
-
+                        st.error(f"❌ Error al eliminar: {str(e)}")
+                        
 # Formulario reutilizable para documentos
 def crear_formulario_documento(tipo_documento):
     """Crea un formulario reutilizable para diferentes tipos de documentos"""
@@ -1065,20 +1062,23 @@ if mongo_uri:
             filtro_prioridad_busq = st.selectbox("Filtrar por prioridad", ["Todas", "Alta", "Media", "Baja"])
         
         # Realizar búsqueda
-        if buscar_btn and criterio_busqueda:
-            with st.spinner("🔍 Buscando en la base de datos..."):
-                # Preparar filtros adicionales
-                filtros_adicionales = {}
-                if filtro_tipo_busq != "Todos":
-                    filtros_adicionales["tipo"] = filtro_tipo_busq.lower()
-                if filtro_categoria_busq != "Todas":
-                    filtros_adicionales["categoria"] = filtro_categoria_busq
-                if filtro_prioridad_busq != "Todas":
-                    filtros_adicionales["prioridad"] = filtro_prioridad_busq
-                
-                documentos_encontrados, error = buscar_documentos(
-                    db, criterio_busqueda, tipo_busqueda, filtros_adicionales
-                )
+    if buscar_btn and criterio_busqueda:
+    with st.spinner("🔍 Buscando en la base de datos..."):
+        # Preparar filtros adicionales
+        filtros_adicionales = {}
+        if filtro_tipo_busq != "Todos":
+            filtros_adicionales["tipo"] = filtro_tipo_busq.lower()
+        if filtro_categoria_busq != "Todas":
+            filtros_adicionales["categoria"] = filtro_categoria_busq
+        if filtro_prioridad_busq != "Todas":
+            filtros_adicionales["prioridad"] = filtro_prioridad_busq
+        
+        # AGREGAR TIMESTAMP PARA INVALIDAR CACHE
+        cache_key = f"busqueda_{criterio_busqueda}_{tipo_busqueda}_{st.session_state.get('last_delete_time', '')}"
+        
+        documentos_encontrados, error = buscar_documentos(
+            db, criterio_busqueda, tipo_busqueda, filtros_adicionales
+        )
                 
                 if error:
                     st.error(f"❌ Error en búsqueda: {error}")
@@ -1484,6 +1484,7 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
