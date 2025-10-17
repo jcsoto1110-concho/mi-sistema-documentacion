@@ -10,6 +10,7 @@ import tempfile
 import pandas as pd
 import time
 from pathlib import Path
+import re
 
 # Configuración de la página
 st.set_page_config(
@@ -28,7 +29,7 @@ if 'db_connection' not in st.session_state:
     st.session_state.db_connection = None
 if 'db_connected' not in st.session_state:
     st.session_state.db_connected = False
-if 'current_user' not in st.session_state:  # NUEVO: usuario actual
+if 'current_user' not in st.session_state:
     st.session_state.current_user = "Invitado"
 
 # CSS personalizado para mejorar la apariencia
@@ -142,6 +143,285 @@ def connect_mongodb(uri):
     except Exception as e:
         return None, False, f"Error: {str(e)}"
 
+# --- NUEVAS FUNCIONES PARA CARGA LOCAL ---
+
+def extraer_ci_desde_nombre(nombre_archivo, patron_busqueda):
+    """
+    Extrae el CI del nombre del archivo según el patrón especificado
+    """
+    try:
+        # Eliminar la extensión del archivo
+        nombre_sin_extension = Path(nombre_archivo).stem
+        
+        if patron_busqueda == "CI al inicio":
+            # Buscar números al inicio del nombre (8-10 dígitos típicos de CI)
+            match = re.match(r'^(\d{8,10})', nombre_sin_extension)
+            if match:
+                return match.group(1)
+        
+        elif patron_busqueda == "CI en cualquier parte":
+            # Buscar números en cualquier parte del nombre
+            matches = re.findall(r'\d{8,10}', nombre_sin_extension)
+            if matches:
+                return matches[0]  # Tomar el primer CI encontrado
+        
+        elif patron_busqueda == "CI específico en nombre":
+            # Buscar patrones comunes como CI_12345678 o 12345678_nombre
+            patterns = [
+                r'CI[_\-\s]*(\d{8,10})',
+                r'(\d{8,10})[_\-\s]',
+                r'cedula[_\-\s]*(\d{8,10})',
+                r'identificacion[_\-\s]*(\d{8,10})'
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, nombre_sin_extension, re.IGNORECASE)
+                if match:
+                    return match.group(1)
+        
+        return None
+    except Exception as e:
+        return None
+
+def buscar_archivos_locales(ruta_base, tipos_archivo, max_documentos):
+    """
+    Busca archivos en la ruta especificada
+    """
+    try:
+        ruta = Path(ruta_base)
+        if not ruta.exists():
+            return []
+        
+        archivos = []
+        for extension in tipos_archivo:
+            patron = f"*{extension}"
+            archivos.extend(ruta.rglob(patron))
+        
+        # Limitar al máximo especificado
+        return archivos[:max_documentos]
+    
+    except Exception as e:
+        st.error(f"❌ Error buscando archivos: {str(e)}")
+        return []
+
+def procesar_archivo_local(archivo_path, ci, metadatos_ci, config):
+    """
+    Procesa un archivo local para la carga masiva
+    """
+    try:
+        # Determinar tipo de archivo
+        extension = archivo_path.suffix.lower()
+        if extension == '.pdf':
+            tipo_archivo = 'pdf'
+        elif extension in ['.docx', '.doc']:
+            tipo_archivo = 'word'
+        elif extension in ['.jpg', '.jpeg', '.png']:
+            tipo_archivo = 'imagen'
+        elif extension == '.txt':
+            tipo_archivo = 'texto'
+        else:
+            tipo_archivo = 'documento'
+        
+        # Generar título automático si no está en metadatos
+        titulo = metadatos_ci.get('titulo')
+        if not titulo:
+            nombre_archivo = archivo_path.stem
+            titulo = f"{nombre_archivo} - {metadatos_ci['nombre']}"
+        
+        # Procesar etiquetas
+        etiquetas = []
+        if 'etiquetas' in metadatos_ci and pd.notna(metadatos_ci['etiquetas']):
+            etiquetas = [tag.strip() for tag in str(metadatos_ci['etiquetas']).split(',')]
+        
+        # Agregar etiquetas automáticas
+        etiquetas.extend([str(ci), 'carga_local', 'sistema_archivos', tipo_archivo])
+        
+        # Obtener información del archivo
+        tamaño_bytes = archivo_path.stat().st_size
+        fecha_modificacion = datetime.fromtimestamp(archivo_path.stat().st_mtime)
+        
+        # Crear documento (sin contenido binario, solo metadatos)
+        documento = {
+            "titulo": titulo,
+            "categoria": metadatos_ci.get('categoria', 'Personal'),
+            "autor": metadatos_ci.get('autor', metadatos_ci['nombre']),
+            "ci": str(ci),
+            "nombre_completo": metadatos_ci['nombre'],
+            "version": metadatos_ci.get('version', '1.0'),
+            "tags": etiquetas,
+            "prioridad": metadatos_ci.get('prioridad', 'Media'),
+            "tipo": tipo_archivo,
+            "nombre_archivo": archivo_path.name,
+            "ruta_local": str(archivo_path),
+            "tamaño_bytes": tamaño_bytes,
+            "fecha_modificacion_local": fecha_modificacion,
+            "fecha_creacion": datetime.utcnow(),
+            "fecha_actualizacion": datetime.utcnow(),
+            "usuario_creacion": st.session_state.current_user,
+            "usuario_actualizacion": st.session_state.current_user,
+            "procesado_local": True,
+            "lote_carga": config.get('lote_id'),
+            "almacenamiento": "local"  # Indica que el archivo está en sistema local
+        }
+        
+        return documento, None
+        
+    except Exception as e:
+        return None, f"Error procesando {archivo_path}: {str(e)}"
+
+def procesar_carga_local(db, ruta_base, df_metadatos, tipos_archivo, max_documentos, 
+                        tamaño_lote, patron_busqueda, sobrescribir_existentes):
+    """
+    Función principal para procesar carga masiva local
+    """
+    try:
+        # Configuración
+        config = {
+            'lote_id': f"local_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        }
+        
+        # Contadores
+        total_archivos = 0
+        archivos_procesados = 0
+        documentos_exitosos = 0
+        documentos_fallidos = 0
+        documentos_duplicados = 0
+        documentos_sin_ci = 0
+        cis_encontrados = set()
+        
+        # Buscar archivos
+        st.info("🔍 Buscando archivos en la carpeta local...")
+        archivos_encontrados = buscar_archivos_locales(ruta_base, tipos_archivo, max_documentos)
+        
+        if not archivos_encontrados:
+            st.warning("⚠️ No se encontraron archivos para procesar")
+            return
+        
+        st.success(f"🎯 Encontrados {len(archivos_encontrados)} archivos")
+        
+        # Crear mapeo CI -> metadatos para búsqueda rápida
+        mapeo_metadatos = {}
+        for _, fila in df_metadatos.iterrows():
+            ci_str = str(fila['ci']).strip()
+            mapeo_metadatos[ci_str] = fila.to_dict()
+        
+        # Configurar interfaz de progreso
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        resultados_container = st.container()
+        
+        # Procesar archivos por lotes
+        for i in range(0, len(archivos_encontrados), tamaño_lote):
+            lote_actual = archivos_encontrados[i:i + tamaño_lote]
+            documentos_a_insertar = []
+            
+            for archivo_path in lote_actual:
+                # Extraer CI del nombre del archivo
+                ci_extraido = extraer_ci_desde_nombre(archivo_path.name, patron_busqueda)
+                
+                if not ci_extraido:
+                    documentos_sin_ci += 1
+                    continue
+                
+                # Buscar metadatos para este CI
+                metadatos_ci = mapeo_metadatos.get(ci_extraido)
+                if not metadatos_ci:
+                    documentos_sin_ci += 1
+                    continue
+                
+                cis_encontrados.add(ci_extraido)
+                
+                # Verificar duplicados si no se permite sobrescribir
+                if not sobrescribir_existentes:
+                    existe = db.documentos.count_documents({
+                        "nombre_archivo": archivo_path.name,
+                        "ci": ci_extraido,
+                        "almacenamiento": "local"
+                    }) > 0
+                    
+                    if existe:
+                        documentos_duplicados += 1
+                        continue
+                
+                # Procesar archivo
+                documento, error = procesar_archivo_local(archivo_path, ci_extraido, metadatos_ci, config)
+                
+                if error:
+                    documentos_fallidos += 1
+                    st.error(error)
+                else:
+                    documentos_a_insertar.append(documento)
+            
+            # Insertar lote en MongoDB
+            if documentos_a_insertar:
+                try:
+                    result = db.documentos.insert_many(documentos_a_insertar, ordered=False)
+                    documentos_exitosos += len(result.inserted_ids)
+                except Exception as e:
+                    documentos_fallidos += len(documentos_a_insertar)
+                    st.error(f"Error insertando lote: {str(e)}")
+            
+            archivos_procesados += len(lote_actual)
+            
+            # Actualizar progreso
+            progreso = archivos_procesados / len(archivos_encontrados)
+            progress_bar.progress(progreso)
+            status_text.text(
+                f"📊 Progreso: {archivos_procesados}/{len(archivos_encontrados)} | "
+                f"✅ Exitosos: {documentos_exitosos} | "
+                f"❌ Fallidos: {documentos_fallidos} | "
+                f"⚡ Duplicados: {documentos_duplicados} | "
+                f"🔍 Sin CI: {documentos_sin_ci}"
+            )
+            
+            # Pequeña pausa para no sobrecargar
+            time.sleep(0.1)
+        
+        # Mostrar resultados finales
+        progress_bar.progress(1.0)
+        status_text.text("✅ Procesamiento completado!")
+        
+        with resultados_container:
+            st.markdown("### 📈 Resultados Finales - Carga Local")
+            
+            # Métricas principales
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Archivos Encontrados", len(archivos_encontrados))
+            with col2:
+                st.metric("Procesados Exitosos", documentos_exitosos)
+            with col3:
+                st.metric("Fallidos/Sin CI", documentos_fallidos + documentos_sin_ci)
+            with col4:
+                st.metric("CIs Encontrados", len(cis_encontrados))
+            
+            if documentos_exitosos > 0:
+                st.success(f"🎉 Carga local completada por {st.session_state.current_user}! {documentos_exitosos} documentos procesados exitosamente.")
+                st.balloons()
+                
+                # Mostrar detalles adicionales
+                with st.expander("📋 Detalles del procesamiento", expanded=True):
+                    col_d1, col_d2, col_d3 = st.columns(3)
+                    with col_d1:
+                        st.metric("Documentos duplicados", documentos_duplicados)
+                    with col_d2:
+                        st.metric("Archivos sin CI", documentos_sin_ci)
+                    with col_d3:
+                        st.metric("Fallidos en procesamiento", documentos_fallidos)
+                
+                # Actualizar estadísticas
+                st.session_state.last_delete_time = datetime.now().timestamp()
+            
+            if documentos_duplicados > 0:
+                st.info(f"💡 {documentos_duplicados} documentos no se procesaron por duplicados. "
+                       "Marca 'Sobrescribir documentos existentes' para forzar el reprocesamiento.")
+            
+            if documentos_sin_ci > 0:
+                st.warning(f"⚠️ {documentos_sin_ci} archivos no se procesaron porque no se pudo extraer el CI o no había metadatos. "
+                          "Verifica que los nombres de archivo contengan el CI y que el CSV tenga los metadatos correspondientes.")
+                
+    except Exception as e:
+        st.error(f"❌ Error en el procesamiento local: {str(e)}")
+
 # Sidebar mejorado
 with st.sidebar:
     st.markdown("## 🔐 Configuración")
@@ -149,7 +429,7 @@ with st.sidebar:
     # Logo o imagen de la empresa
     st.image("https://cdn-icons-png.flaticon.com/512/2721/2721264.png", width=80)
     
-    # NUEVO: Selección de usuario
+    # Selección de usuario
     st.markdown("### 👤 Usuario Actual")
     usuario_actual = st.selectbox(
         "Selecciona tu usuario:",
@@ -184,7 +464,7 @@ with st.sidebar:
     if disconnect_btn:
         st.session_state.db_connection = None
         st.session_state.db_connected = False
-        st.session_state.current_user = "Invitado"  # Resetear usuario
+        st.session_state.current_user = "Invitado"
         st.session_state.last_delete_time = datetime.now().timestamp()
         st.success("🔓 Desconectado de la base de datos")
         st.rerun()
@@ -202,23 +482,18 @@ with st.sidebar:
     
     # Mostrar estadísticas si hay conexión
     if st.session_state.db_connected:
-        # NUEVO: Mostrar usuario conectado en el mensaje de conexión
         st.success(f"✅ Conexión activa | 👤 {st.session_state.current_user}")
         st.markdown("---")
         
         try:
             db = st.session_state.db_connection
             
-            # USAR TIMESTAMP PARA ACTUALIZAR ESTADÍSTICAS
-            cache_buster = st.session_state.get('last_delete_time', '')
-            
             total_docs = db.documentos.count_documents({})
             pdf_count = db.documentos.count_documents({"tipo": "pdf"})
             word_count = db.documentos.count_documents({"tipo": "word"})
             text_count = db.documentos.count_documents({"tipo": "texto"})
             image_count = db.documentos.count_documents({"tipo": "imagen"})
-            
-            # NUEVO: Estadísticas de usuarios
+            local_count = db.documentos.count_documents({"almacenamiento": "local"})
             usuarios_activos = db.documentos.distinct("usuario_creacion")
             
             st.markdown("### 📊 Estadísticas")
@@ -235,8 +510,9 @@ with st.sidebar:
                 st.metric("📋 Word", word_count)
                 st.metric("🖼️ Imágenes", image_count)
             
-            # NUEVO: Estadísticas de usuarios
+            # Estadísticas adicionales
             st.metric("👥 Usuarios Activos", len(usuarios_activos))
+            st.metric("💾 Archivos Locales", local_count)
                 
         except Exception as e:
             st.error(f"❌ Error obteniendo estadísticas: {str(e)}")
@@ -247,6 +523,8 @@ with st.sidebar:
         st.warning("⚠️ Presiona 'Conectar' para establecer la conexión")
     else:
         st.info("👈 Ingresa la cadena de conexión MongoDB")
+
+# ... (el resto de las funciones existentes se mantienen igual: procesar_archivo, crear_boton_descarga, buscar_documentos, mostrar_documento_compacto, crear_formulario_documento, validar_y_guardar_documento, validar_csv_metadatos, buscar_archivos_por_ci, procesar_archivo_masivo, procesar_carga_masiva_ci, crear_plantilla_carga_masiva)
 
 # Funciones de procesamiento mejoradas
 def procesar_archivo(archivo, tipo_archivo):
@@ -297,7 +575,7 @@ def buscar_documentos(db, criterio_busqueda, tipo_busqueda, filtros_adicionales=
             "categoria": "categoria",
             "ci": "ci",
             "descripcion": "descripcion",
-            "usuario": "usuario_creacion"  # NUEVO: búsqueda por usuario
+            "usuario": "usuario_creacion"
         }
         
         campo = busqueda_map.get(tipo_busqueda)
@@ -310,9 +588,6 @@ def buscar_documentos(db, criterio_busqueda, tipo_busqueda, filtros_adicionales=
         # Aplicar filtros adicionales
         if filtros_adicionales:
             query.update(filtros_adicionales)
-        
-        # AGREGAR TIMESTAMP PARA INVALIDAR CACHE
-        cache_key = st.session_state.get('last_delete_time', '')
         
         documentos = list(db.documentos.find(query).sort("fecha_creacion", -1))
         return documentos, None
@@ -354,10 +629,14 @@ def mostrar_documento_compacto(doc, key_suffix=""):
                 st.markdown(f'<div class="compact-metadata">🔄 **Versión:** {doc["version"]}</div>', unsafe_allow_html=True)
             with meta_col3:
                 st.markdown(f'<div class="compact-metadata">📅 **Creado:** {doc["fecha_creacion"].strftime("%d/%m/%Y")}</div>', unsafe_allow_html=True)
-                # NUEVO: Mostrar usuario que creó el documento
                 st.markdown(f'<div class="compact-metadata">👥 **Por:** {doc.get("usuario_creacion", "N/A")}</div>', unsafe_allow_html=True)
             
-            # NUEVO: Mostrar información de actualización si existe
+            # Información de almacenamiento
+            if doc.get('almacenamiento') == 'local':
+                st.markdown(f'<div class="compact-metadata">💾 **Almacenamiento:** Local ({doc.get("ruta_local", "N/A")})</div>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="compact-metadata">💾 **Almacenamiento:** Base de datos</div>', unsafe_allow_html=True)
+            
             if doc.get('fecha_actualizacion') and doc.get('usuario_actualizacion'):
                 st.markdown(f'<div class="compact-metadata">✏️ **Actualizado:** {doc["fecha_actualizacion"].strftime("%d/%m/%Y")} por {doc["usuario_actualizacion"]}</div>', unsafe_allow_html=True)
             
@@ -376,14 +655,16 @@ def mostrar_documento_compacto(doc, key_suffix=""):
                     tamaño_mb = doc['tamaño_bytes'] / (1024 * 1024)
                     st.markdown(f'<div class="compact-metadata">💾 **Tamaño:** {tamaño_mb:.2f} MB</div>', unsafe_allow_html=True)
                 
-                # Botón de descarga compacto
-                if doc.get('contenido_binario'):
+                # Botón de descarga solo para archivos en base de datos
+                if doc.get('contenido_binario') and doc.get('almacenamiento') != 'local':
                     boton_descarga = crear_boton_descarga(
                         doc['contenido_binario'],
                         doc['nombre_archivo'],
                         doc['tipo']
                     )
                     st.markdown(boton_descarga, unsafe_allow_html=True)
+                elif doc.get('almacenamiento') == 'local':
+                    st.markdown(f'<div class="compact-metadata">📍 **Archivo local:** No disponible para descarga directa</div>', unsafe_allow_html=True)
             
             # ID único (pequeño y discreto)
             st.markdown(f'<div class="compact-metadata" style="font-size: 0.7rem; color: #999;">🆔 **ID:** {doc_id[:12]}...</div>', unsafe_allow_html=True)
@@ -428,7 +709,7 @@ def crear_formulario_documento(tipo_documento, tab_key):
     with st.form(f"form_{tipo_documento}_{tab_key}", clear_on_submit=True):
         st.markdown(f"### 📝 Información del Documento")
         
-        # NUEVO: Mostrar usuario actual que realizará la acción
+        # Mostrar usuario actual que realizará la acción
         st.info(f"**Usuario actual:** 👤 {st.session_state.current_user}")
         
         col1, col2 = st.columns(2)
@@ -549,9 +830,9 @@ def validar_y_guardar_documento(tipo_documento, variables_locales):
         "tipo": tipo_documento,
         "fecha_creacion": datetime.utcnow(),
         "fecha_actualizacion": datetime.utcnow(),
-        # NUEVO: Campos de usuario
         "usuario_creacion": st.session_state.current_user,
-        "usuario_actualizacion": st.session_state.current_user
+        "usuario_actualizacion": st.session_state.current_user,
+        "almacenamiento": "base_datos"  # Para documentos subidos directamente
     }
     
     if tipo_documento == "texto":
@@ -679,11 +960,11 @@ def procesar_archivo_masivo(archivo_path, ci, metadatos_ci, config):
             "ruta_original": str(archivo_path),
             "fecha_creacion": datetime.utcnow(),
             "fecha_actualizacion": datetime.utcnow(),
-            # NUEVO: Campos de usuario para carga masiva
             "usuario_creacion": st.session_state.current_user,
             "usuario_actualizacion": st.session_state.current_user,
             "procesado_masivo": True,
-            "lote_carga": config.get('lote_id')
+            "lote_carga": config.get('lote_id'),
+            "almacenamiento": "base_datos"
         }
         
         return documento, None
@@ -868,7 +1149,6 @@ def crear_plantilla_carga_masiva():
 
 if st.session_state.db_connected and st.session_state.db_connection is not None:
     db = st.session_state.db_connection
-    # NUEVO: Mostrar usuario en el mensaje de conexión principal
     st.success(f"🚀 Conectado a la base de datos | 👤 Usuario: {st.session_state.current_user}")
     
     # --- PESTAÑAS REORGANIZADAS ---
@@ -912,7 +1192,7 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                         "categoria": "📂 Categoría",
                         "ci": "🔢 CI/Cédula",
                         "descripcion": "📋 Descripción",
-                        "usuario": "👥 Usuario creador"  # NUEVO: opción de búsqueda por usuario
+                        "usuario": "👥 Usuario creador"
                     }[x],
                     key="tipo_busqueda_tab1"
                 )
@@ -942,9 +1222,6 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                     filtros_adicionales["categoria"] = filtro_categoria_busq
                 if filtro_prioridad_busq != "Todas":
                     filtros_adicionales["prioridad"] = filtro_prioridad_busq
-                
-                # USAR TIMESTAMP PARA EVITAR CACHE
-                cache_buster = st.session_state.get('last_delete_time', '')
                 
                 documentos_encontrados, error = buscar_documentos(
                     db, criterio_busqueda, tipo_busqueda, filtros_adicionales
@@ -1013,13 +1290,10 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                 {"titulo": {"$regex": busqueda_rapida, "$options": "i"}},
                 {"ci": {"$regex": busqueda_rapida, "$options": "i"}},
                 {"autor": {"$regex": busqueda_rapida, "$options": "i"}},
-                {"usuario_creacion": {"$regex": busqueda_rapida, "$options": "i"}}  # NUEVO: búsqueda por usuario
+                {"usuario_creacion": {"$regex": busqueda_rapida, "$options": "i"}}
             ]
         
         try:
-            # USAR TIMESTAMP PARA EVITAR CACHE
-            cache_buster = st.session_state.get('last_delete_time', '')
-            
             with st.spinner("Cargando documentos..."):
                 documentos = list(db.documentos.find(query).sort("fecha_creacion", -1))
             
@@ -1038,13 +1312,12 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
     # PESTAÑA 6: Carga Masiva por CI
     with tab6:
         st.markdown("### 🚀 Carga Masiva de Archivos")
-        st.info(f"""
+        st.info("""
         **Carga masiva de documentos organizados por carpetas de CI**
         - Estructura: `C:/ruta/carpetas/CI/archivos.pdf`
         - Soporta: PDF, Word, imágenes, texto
         - Metadatos automáticos desde CSV
         - Hasta 10,000 documentos por carga
-        - **Usuario actual:** 👤 {st.session_state.current_user}
         """)
         
         # Configuración en dos columnas
@@ -1188,27 +1461,28 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                 except Exception as e:
                     st.error(f"❌ Error en validación: {str(e)}")
 
-    # PESTAÑA 7: Carga Masiva con Archivos Locales
+    # PESTAÑA 7: Carga Masiva con Archivos Locales (COMPLETAMENTE IMPLEMENTADA)
     with tab7:
-        st.markdown("### 💾 Carga Masiva (Archivos Locales)")
+        st.markdown("### 💾 Carga Masiva Local (Archivos en Sistema)")
         st.info(f"""
         **Carga masiva manteniendo archivos en sistema local**
-        - Estructura: `C:/subir_archivos/archivos_con_CI_en_nombre.pdf`
-        - Solo metadatos en MongoDB, archivos permanecen en carpeta local
+        - Los archivos permanecen en su ubicación original
+        - Solo los metadatos se almacenan en MongoDB
         - Soporta: PDF, Word, imágenes, texto
         - Hasta 10,000 documentos por carga
         - **Usuario actual:** 👤 {st.session_state.current_user}
         """)
         
-        # Configuración simplificada
+        # Configuración en dos columnas
         col_config1, col_config2 = st.columns(2)
         
         with col_config1:
+            st.markdown("#### 📁 Configuración de Carpetas")
             ruta_base_local = st.text_input(
                 "**Ruta de carpeta de archivos** *",
                 value="C:\\subir_archivos\\",
                 placeholder="C:\\subir_archivos\\",
-                help="Ruta donde están todos los archivos",
+                help="Ruta donde están todos los archivos (se buscará recursivamente)",
                 key="ruta_base_local_tab7"
             )
             
@@ -1219,8 +1493,16 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                 help="Selecciona los tipos de archivo a incluir",
                 key="tipos_archivo_local_tab7"
             )
+            
+            patron_busqueda = st.selectbox(
+                "**Patrón de búsqueda de CI** *",
+                ["CI al inicio", "CI en cualquier parte", "CI específico en nombre"],
+                help="Cómo buscar el CI en los nombres de archivo",
+                key="patron_busqueda_tab7"
+            )
         
         with col_config2:
+            st.markdown("#### 📊 Configuración de Procesamiento")
             max_documentos_local = st.number_input(
                 "**Límite de documentos**",
                 min_value=100,
@@ -1231,12 +1513,40 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                 key="max_documentos_local_tab7"
             )
             
-            patron_busqueda = st.selectbox(
-                "**Patrón de búsqueda de CI**",
-                ["CI al inicio", "CI en cualquier parte", "CI específico en nombre"],
-                help="Cómo buscar el CI en los nombres de archivo",
-                key="patron_busqueda_tab7"
+            tamaño_lote_local = st.slider(
+                "**Tamaño del lote**",
+                min_value=50,
+                max_value=500,
+                value=100,
+                help="Documentos procesados por lote (mejora performance)",
+                key="tamaño_lote_local_tab7"
             )
+            
+            sobrescribir_existentes_local = st.checkbox(
+                "**Sobrescribir documentos existentes**",
+                value=False,
+                help="Reemplazar documentos que ya existen en la base de datos",
+                key="sobrescribir_existentes_local_tab7"
+            )
+        
+        # Sección para CSV de metadatos
+        st.markdown("#### 📋 Archivo CSV con Metadatos")
+        st.info("""
+        **El CSV debe contener las columnas:**
+        - `ci` (obligatorio): Número de cédula (debe coincidir con los nombres de archivo)
+        - `nombre` (obligatorio): Nombre completo
+        - `titulo`: Título del documento (si no se especifica, se genera automáticamente)
+        - `categoria`: Categoría del documento
+        - `autor`: Autor del documento  
+        - `version`: Versión del documento
+        - `etiquetas`: Tags separados por comas
+        - `prioridad`: Baja, Media, Alta
+        
+        **Ejemplos de nombres de archivo:**
+        - `12345678_contrato.pdf` (CI al inicio)
+        - `contrato_12345678.pdf` (CI en cualquier parte)
+        - `CI_12345678_identificacion.jpg` (CI específico)
+        """)
         
         archivo_csv_local = st.file_uploader(
             "**Subir CSV con metadatos** *",
@@ -1245,8 +1555,69 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
             key="archivo_csv_local_tab7"
         )
         
+        # Previsualización del CSV
+        if archivo_csv_local:
+            try:
+                df_metadatos_local = pd.read_csv(archivo_csv_local)
+                st.success(f"✅ CSV cargado: {len(df_metadatos_local)} registros de CI encontrados")
+                
+                with st.expander("📊 Vista previa del CSV", expanded=True):
+                    st.dataframe(df_metadatos_local.head(10), use_container_width=True)
+                    
+                    # Estadísticas del CSV
+                    col_stats1, col_stats2, col_stats3 = st.columns(3)
+                    with col_stats1:
+                        st.metric("Total CIs", len(df_metadatos_local))
+                    with col_stats2:
+                        st.metric("Columnas", len(df_metadatos_local.columns))
+                    with col_stats3:
+                        cis_unicos = df_metadatos_local['ci'].nunique() if 'ci' in df_metadatos_local.columns else 0
+                        st.metric("CIs Únicos", cis_unicos)
+            
+            except Exception as e:
+                st.error(f"❌ Error al leer el CSV: {str(e)}")
+        
+        # Botón de procesamiento
+        st.markdown("#### ⚡ Procesamiento Local")
+        
         if st.button("🚀 Iniciar Carga Local", type="primary", use_container_width=True, key="btn_carga_local_tab7"):
-            st.info("ℹ️ Esta funcionalidad está disponible en la versión completa")
+            if not archivo_csv_local:
+                st.error("❌ Debes subir un archivo CSV con los metadatos")
+            elif not ruta_base_local:
+                st.error("❌ Debes especificar la ruta de la carpeta de archivos")
+            elif not tipos_archivo_local:
+                st.error("❌ Debes seleccionar al menos un tipo de archivo")
+            else:
+                # Validar estructura del CSV
+                try:
+                    df_metadatos_local = pd.read_csv(archivo_csv_local)
+                    errores = validar_csv_metadatos(df_metadatos_local)
+                    
+                    if errores:
+                        st.error("❌ Errores en el CSV:")
+                        for error in errores:
+                            st.write(f"• {error}")
+                    else:
+                        # Verificar que la ruta existe
+                        ruta_path = Path(ruta_base_local)
+                        if not ruta_path.exists():
+                            st.error(f"❌ La ruta especificada no existe: {ruta_base_local}")
+                        else:
+                            # Procesar carga local
+                            with st.spinner("🔄 Iniciando procesamiento local..."):
+                                resultado = procesar_carga_local(
+                                    db=db,
+                                    ruta_base=ruta_base_local,
+                                    df_metadatos=df_metadatos_local,
+                                    tipos_archivo=tipos_archivo_local,
+                                    max_documentos=max_documentos_local,
+                                    tamaño_lote=tamaño_lote_local,
+                                    patron_busqueda=patron_busqueda,
+                                    sobrescribir_existentes=sobrescribir_existentes_local
+                                )
+                
+                except Exception as e:
+                    st.error(f"❌ Error en validación: {str(e)}")
 
 else:
     st.info("👈 Configura la conexión a MongoDB en la barra lateral para comenzar")
