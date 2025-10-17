@@ -26,6 +26,8 @@ if 'refresh_counter' not in st.session_state:
     st.session_state.refresh_counter = 0
 if 'db_connection' not in st.session_state:
     st.session_state.db_connection = None
+if 'db_connected' not in st.session_state:  # NUEVO: bandera de conexión
+    st.session_state.db_connected = False
 
 # CSS personalizado para mejorar la apariencia
 st.markdown("""
@@ -152,6 +154,7 @@ with st.sidebar:
     
     if disconnect_btn:
         st.session_state.db_connection = None
+        st.session_state.db_connected = False  # NUEVO: actualizar bandera
         st.session_state.last_delete_time = datetime.now().timestamp()
         st.success("🔓 Desconectado de la base de datos")
         st.rerun()
@@ -161,13 +164,14 @@ with st.sidebar:
             db, connected, message = connect_mongodb(mongo_uri)
             if connected:
                 st.session_state.db_connection = db
+                st.session_state.db_connected = True  # NUEVO: actualizar bandera
                 st.session_state.last_delete_time = datetime.now().timestamp()
                 st.success(f"✅ {message}")
             else:
                 st.error(f"❌ {message}")
     
     # Mostrar estadísticas si hay conexión
-    if st.session_state.db_connection:
+    if st.session_state.db_connected:  # CAMBIADO: usar la bandera en lugar del objeto
         st.success("✅ Conexión activa")
         st.markdown("---")
         
@@ -200,8 +204,9 @@ with st.sidebar:
         except Exception as e:
             st.error(f"❌ Error obteniendo estadísticas: {str(e)}")
             st.session_state.db_connection = None
+            st.session_state.db_connected = False  # NUEVO: actualizar bandera
     
-    elif mongo_uri and not st.session_state.db_connection:
+    elif mongo_uri and not st.session_state.db_connected:  # CAMBIADO: usar la bandera
         st.warning("⚠️ Presiona 'Conectar' para establecer la conexión")
     else:
         st.info("👈 Ingresa la cadena de conexión MongoDB")
@@ -809,7 +814,8 @@ def crear_plantilla_carga_masiva():
 
 # --- APLICACIÓN PRINCIPAL ---
 
-if st.session_state.db_connection:
+# CAMBIAR ESTA LÍNEA: usar st.session_state.db_connected en lugar de st.session_state.db_connection
+if st.session_state.db_connected and st.session_state.db_connection is not None:
     db = st.session_state.db_connection
     st.success("🚀 Conectado a la base de datos")
     
