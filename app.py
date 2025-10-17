@@ -19,12 +19,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Inicializar session_state para control de eliminaciones
-if 'deleted_docs' not in st.session_state:
-    st.session_state.deleted_docs = []
-if 'force_refresh' not in st.session_state:
-    st.session_state.force_refresh = False
-    
 # CSS personalizado para mejorar la apariencia
 st.markdown("""
 <style>
@@ -268,27 +262,17 @@ def mostrar_documento(doc, key_suffix=""):
         with col2:
             # Botones de acción
             st.write("")  # Espacio
-            
-            # SOLUCIÓN COMPLETA - Botón de eliminar
             if st.button("🗑️ Eliminar", key=f"delete_{doc['_id']}_{key_suffix}", use_container_width=True):
-                with st.spinner("Eliminando documento..."):
-                    try:
-                        # Intentar eliminar el documento
-                        result = db.documentos.delete_one({"_id": doc["_id"]})
-                        
-                        if result.deleted_count > 0:
-                            st.success("✅ Documento eliminado correctamente")
-                            # INVALIDAR CACHE Y FORZAR ACTUALIZACIÓN COMPLETA
-                            st.session_state.last_delete_time = datetime.now()
-                            st.session_state.force_refresh = True
-                            time.sleep(2)
-                            st.rerun()
-                        else:
-                            st.error("❌ No se pudo eliminar el documento")
-                            
-                    except Exception as e:
-                        st.error(f"❌ Error al eliminar: {str(e)}")
-                        
+                with st.spinner("Eliminando..."):
+                    db.documentos.delete_one({"_id": doc["_id"]})
+                    st.success("✅ Documento eliminado")
+                    time.sleep(1)
+                    st.rerun()
+            
+            if st.button("📋 Copiar ID", key=f"copy_{doc['_id']}_{key_suffix}", use_container_width=True):
+                st.code(str(doc['_id']), language='text')
+                st.success("ID copiado al portapapeles")
+
 # Formulario reutilizable para documentos
 def crear_formulario_documento(tipo_documento):
     """Crea un formulario reutilizable para diferentes tipos de documentos"""
@@ -1061,8 +1045,7 @@ if mongo_uri:
         with col_f3:
             filtro_prioridad_busq = st.selectbox("Filtrar por prioridad", ["Todas", "Alta", "Media", "Baja"])
         
-    
-    # Realizar búsqueda
+        # Realizar búsqueda
         if buscar_btn and criterio_busqueda:
             with st.spinner("🔍 Buscando en la base de datos..."):
                 # Preparar filtros adicionales
@@ -1073,8 +1056,8 @@ if mongo_uri:
                     filtros_adicionales["categoria"] = filtro_categoria_busq
                 if filtro_prioridad_busq != "Todas":
                     filtros_adicionales["prioridad"] = filtro_prioridad_busq
-        
-               documentos_encontrados, error = buscar_documentos(
+                
+                documentos_encontrados, error = buscar_documentos(
                     db, criterio_busqueda, tipo_busqueda, filtros_adicionales
                 )
                 
@@ -1482,18 +1465,3 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
