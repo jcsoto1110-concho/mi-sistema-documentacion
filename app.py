@@ -1655,6 +1655,210 @@ with tab7:
         help="CSV con información de CI, nombres, títulos, etc.",
         key="archivo_csv_local_tab7"
     )
+
+
+def procesar_carga_local_upload(db, archivos_subidos, df_metadatos, patron_busqueda, sobrescribir_existentes):
+    """
+    Función principal para procesar carga masiva local con archivos subidos
+    """
+    try:
+        # Configuración
+        config = {
+            'lote_id': f"local_upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        }
+        
+        # Contadores
+        archivos_procesados = 0
+        documentos_exitosos = 0
+        documentos_fallidos = 0
+        documentos_duplicados = 0
+        documentos_sin_ci = 0
+        cis_encontrados = set()
+        
+        st.info(f"🔍 Procesando {len(archivos_subidos)} archivos subidos...")
+        
+        # Crear mapeo CI -> metadatos para búsqueda rápida
+        mapeo_metadatos = {}
+        for _, fila in df_metadatos.iterrows():
+            ci_str = str(fila['ci']).strip()
+            mapeo_metadatos[ci_str] = fila.to_dict()
+        
+        # Configurar interfaz de progreso
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # Procesar archivos
+        documentos_a_insertar = []
+        
+        for archivo in archivos_subidos:
+            # Extraer CI del nombre del archivo
+            ci_extraido = extraer_ci_desde_nombre(archivo.name, patron_busqueda)
+            
+            if not ci_extraido:
+                documentos_sin_ci += 1
+                continue
+            
+            # Buscar metadatos para este CI
+            metadatos_ci = mapeo_metadatos.get(ci_extraido)
+            if not metadatos_ci:
+                documentos_sin_ci += 1
+                continue
+            
+            cis_encontrados.add(ci_extraido)
+            
+            # Verificar duplicados si no se permite sobrescribir
+            if not sobrescribir_existentes:
+                existe = db.documentos.count_documents({
+                    "nombre_archivo": archivo.name,
+                    "ci": ci_extraido
+                }) > 0
+                
+                if existe:
+                    documentos_duplicados += 1
+                    continue
+            
+            # Procesar archivo
+            documento, error = procesar_archivo_local_upload(archivo, ci_extraido, metadatos_ci, config)
+            
+            if error:
+                documentos_fallidos += 1
+                st.error(error)
+            else:
+                documentos_a_insertar.append(documento)
+            
+            archivos_procesados += 1
+            
+            # Actualizar progreso
+            progreso = archivos_procesados / len(archivos_subidos)
+            progress_bar.progress(progreso)
+            status_text.text(
+                f"📊 Progreso: {archivos_procesados}/{len(archivos_subidos)} | "
+                f"✅ Listos: {len(documentos_a_insertar)} | "
+                f"❌ Fallidos: {documentos_fallidos} | "
+                f"⚡ Duplicados: {documentos_duplicados} | "
+                f"🔍 Sin CI: {documentos_sin_ci}"
+            )
+        
+        # Insertar todos los documentos en MongoDB
+        if documentos_a_insertar:
+            try:
+                result = db.documentos.insert_many(documentos_a_insertar, ordered=False)
+                documentos_exitosos += len(result.inserted_ids)
+            except Exception as e:
+                documentos_fallidos += len(documentos_a_insertar)
+                st.error(f"Error insertando documentos: {str(e)}")
+        
+        # Mostrar resultados finales
+        progress_bar.progress(1.0)
+        status_text.text("✅ Procesamiento completado!")
+        
+        # Resultados
+        st.markdown("### 📈 Resultados Finales - Carga Local")
+        
+        # Métricas principales
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Archivos Subidos", len(archivos_subidos))
+        with col2:
+            st.metric("Procesados Exitosos", documentos_exitosos)
+        with col3:
+            st.metric("Fallidos/Sin CI", documentos_fallidos + documentos_sin_ci)
+        with col4:
+            st.metric("CIs Encontrados", len(cis_encontrados))
+        
+        if documentos_exitosos > 0:
+            st.success(f"🎉 Carga local completada por {st.session_state.mongo_username}! {documentos_exitosos} documentos procesados exitosamente.")
+            st.balloons()
+            
+            # Mostrar detalles adicionales
+            with st.expander("📋 Detalles del procesamiento", expanded=True):
+                col_d1, col_d2, col_d3 = st.columns(3)
+                with col_d1:
+                    st.metric("Documentos duplicados", documentos_duplicados)
+                with col_d2:
+                    st.metric("Archivos sin CI", documentos_sin_ci)
+                with col_d3:
+                    st.metric("Fallidos en procesamiento", documentos_fallidos)
+            
+            # Actualizar estadísticas
+            st.session_state.last_delete_time = datetime.now().timestamp()
+        
+        if documentos_duplicados > 0:
+            st.info(f"💡 {documentos_duplicados} documentos no se procesaron por duplicados. "
+                   "Marca 'Sobrescribir documentos existentes' para forzar el reprocesamiento.")
+        
+        if documentos_sin_ci > 0:
+            st.warning(f"⚠️ {documentos_sin_ci} archivos no se procesaron porque no se pudo extraer el CI o no había metadatos. "
+                      "Verifica que los nombres de archivo contengan el CI y que el CSV tenga los metadatos correspondientes.")
+            
+    except Exception as e:
+        st.error(f"❌ Error en el procesamiento local: {str(e)}")
+
+def procesar_archivo_local_upload(archivo, ci, metadatos_ci, config):
+    """
+    Procesa un archivo subido para la carga masiva local
+    """
+    try:
+        # Determinar tipo de archivo
+        nombre_archivo = archivo.name
+        extension = Path(nombre_archivo).suffix.lower()
+        if extension == '.pdf':
+            tipo_archivo = 'pdf'
+        elif extension in ['.docx', '.doc']:
+            tipo_archivo = 'word'
+        elif extension in ['.jpg', '.jpeg', '.png']:
+            tipo_archivo = 'imagen'
+        elif extension == '.txt':
+            tipo_archivo = 'texto'
+        else:
+            tipo_archivo = 'documento'
+        
+        # Generar título automático si no está en metadatos
+        titulo = metadatos_ci.get('titulo')
+        if not titulo:
+            nombre_sin_extension = Path(nombre_archivo).stem
+            titulo = f"{nombre_sin_extension} - {metadatos_ci['nombre']}"
+        
+        # Procesar etiquetas
+        etiquetas = []
+        if 'etiquetas' in metadatos_ci and pd.notna(metadatos_ci['etiquetas']):
+            etiquetas = [tag.strip() for tag in str(metadatos_ci['etiquetas']).split(',')]
+        
+        # Agregar etiquetas automáticas
+        etiquetas.extend([str(ci), 'carga_local', 'upload', tipo_archivo])
+        
+        # Leer contenido del archivo
+        contenido_binario = Binary(archivo.getvalue())
+        tamaño_bytes = len(contenido_binario)
+        
+        # Crear documento
+        documento = {
+            "titulo": titulo,
+            "categoria": metadatos_ci.get('categoria', 'Personal'),
+            "autor": metadatos_ci.get('autor', metadatos_ci['nombre']),
+            "ci": str(ci),
+            "nombre_completo": metadatos_ci['nombre'],
+            "version": metadatos_ci.get('version', '1.0'),
+            "tags": etiquetas,
+            "prioridad": metadatos_ci.get('prioridad', 'Media'),
+            "tipo": tipo_archivo,
+            "nombre_archivo": nombre_archivo,
+            "contenido_binario": contenido_binario,
+            "tamaño_bytes": tamaño_bytes,
+            "fecha_creacion": datetime.utcnow(),
+            "fecha_actualizacion": datetime.utcnow(),
+            "usuario_creacion": st.session_state.mongo_username,
+            "usuario_actualizacion": st.session_state.mongo_username,
+            "procesado_local": True,
+            "lote_carga": config.get('lote_id'),
+            "almacenamiento": "base_datos"  # Ahora se almacena en la base de datos
+        }
+        
+        return documento, None
+        
+    except Exception as e:
+        return None, f"Error procesando {archivo.name}: {str(e)}"
+        
     
     # Previsualización del CSV - SOLO MOSTRAR, NO PROCESAR
     if archivo_csv_local:
@@ -1741,4 +1945,5 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
