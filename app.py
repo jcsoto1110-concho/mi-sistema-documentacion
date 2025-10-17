@@ -1577,91 +1577,89 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                         sobrescribir_existentes=sobrescribir_existentes
                     )
 
-    # PESTAÑA 7: Carga Masiva con Archivos Locales
-    with tab7:
-        st.markdown("### 💾 Carga Masiva Local (Archivos en Sistema)")
-        st.info(f"""
-        **Carga masiva manteniendo archivos en sistema local**
-        - Los archivos permanecen en su ubicación original
-        - Solo los metadatos se almacenan en MongoDB
-        - Soporta: PDF, Word, imágenes, texto
-        - Hasta 10,000 documentos por carga
-        - **Usuario de BD:** 👤 {st.session_state.mongo_username}
-        """)
-        
-        # Configuración en dos columnas
-        col_config1, col_config2 = st.columns(2)
-        
-      with col_config1:
-    st.markdown("#### 📁 Configuración de Carpetas")
-    ruta_base_local = st.text_input(
-        "**Ruta de carpeta de archivos** *",
-        value="C:/temp/subir_archivos",
-        placeholder="C:/temp/subir_archivos",
-        help="Ruta donde están todos los archivos (se buscará recursivamente)",
-        key="ruta_base_local_tab7"
-    )
+# PESTAÑA 7: Carga Masiva con Archivos Locales
+with tab7:
+    st.markdown("### 💾 Carga Masiva Local (Archivos en Sistema)")
+    st.info(f"""
+    **Carga masiva manteniendo archivos en sistema local**
+    - Los archivos permanecen en su ubicación original
+    - Solo los metadatos se almacenan en MongoDB
+    - Soporta: PDF, Word, imágenes, texto
+    - Hasta 10,000 documentos por carga
+    - **Usuario de BD:** 👤 {st.session_state.mongo_username}
+    """)
     
-    # VERIFICACIÓN INMEDIATA
-    if ruta_base_local:
-        ruta_path = Path(ruta_base_local)
-        if ruta_path.exists():
-            st.success("✅ ✅ ✅ CARPETA ENCONTRADA - Lista para usar")
-            # Mostrar contenido
-            archivos = list(ruta_path.glob("*"))
-            if archivos:
-                st.info(f"📁 Archivos en la carpeta: {len(archivos)}")
-                for archivo in archivos[:3]:  # Mostrar primeros 3
-                    st.write(f"   📄 {archivo.name}")
-            else:
-                st.warning("📁 Carpeta vacía - Agrega algunos archivos")
-        else:
-            st.error("❌ Carpeta NO encontrada - Verifica la ruta")
-
-            
-            
-            tipos_archivo_local = st.multiselect(
-                "**Tipos de archivo a procesar** *",
-                ['.pdf', '.docx', '.doc', '.jpg', '.jpeg', '.png', '.txt'],
-                default=['.pdf', '.docx', '.doc'],
-                help="Selecciona los tipos de archivo a incluir",
-                key="tipos_archivo_local_tab7"
-            )
-            
-            patron_busqueda = st.selectbox(
-                "**Patrón de búsqueda de CI** *",
-                ["CI al inicio", "CI en cualquier parte", "CI específico en nombre"],
-                help="Cómo buscar el CI en los nombres de archivo",
-                key="patron_busqueda_tab7"
-            )
+    # Configuración en dos columnas
+    col_config1, col_config2 = st.columns(2)
+    
+    with col_config1:
+        st.markdown("#### 📁 Configuración de Carpetas")
+        ruta_base_local = st.text_input(
+            "**Ruta de carpeta de archivos** *",
+            value="C:/temp/subir_archivos",
+            placeholder="C:/temp/subir_archivos",
+            help="Ruta donde están todos los archivos (se buscará recursivamente)",
+            key="ruta_base_local_tab7"
+        )
         
-        with col_config2:
-            st.markdown("#### 📊 Configuración de Procesamiento")
-            max_documentos_local = st.number_input(
-                "**Límite de documentos**",
-                min_value=100,
-                max_value=10000,
-                value=3000,
-                step=100,
-                help="Máximo número de documentos a procesar",
-                key="max_documentos_local_tab7"
-            )
-            
-            tamaño_lote_local = st.slider(
-                "**Tamaño del lote**",
-                min_value=50,
-                max_value=500,
-                value=100,
-                help="Documentos procesados por lote (mejora performance)",
-                key="tamaño_lote_local_tab7"
-            )
-            
-            sobrescribir_existentes_local = st.checkbox(
-                "**Sobrescribir documentos existentes**",
-                value=False,
-                help="Reemplazar documentos que ya existen en la base de datos",
-                key="sobrescribir_existentes_local_tab7"
-            )
+        # VERIFICACIÓN INMEDIATA
+        if ruta_base_local:
+            ruta_path = Path(ruta_base_local)
+            if ruta_path.exists():
+                st.success("✅ ✅ ✅ CARPETA ENCONTRADA - Lista para usar")
+                # Mostrar contenido
+                archivos = list(ruta_path.glob("*"))
+                if archivos:
+                    st.info(f"📁 Archivos en la carpeta: {len(archivos)}")
+                    for archivo in archivos[:3]:  # Mostrar primeros 3
+                        st.write(f"   📄 {archivo.name}")
+                else:
+                    st.warning("📁 Carpeta vacía - Agrega algunos archivos")
+            else:
+                st.error("❌ Carpeta NO encontrada - Verifica la ruta")
+
+        tipos_archivo_local = st.multiselect(
+            "**Tipos de archivo a procesar** *",
+            ['.pdf', '.docx', '.doc', '.jpg', '.jpeg', '.png', '.txt'],
+            default=['.pdf', '.docx', '.doc'],
+            help="Selecciona los tipos de archivo a incluir",
+            key="tipos_archivo_local_tab7"
+        )
+        
+        patron_busqueda = st.selectbox(
+            "**Patrón de búsqueda de CI** *",
+            ["CI al inicio", "CI en cualquier parte", "CI específico en nombre"],
+            help="Cómo buscar el CI en los nombres de archivo",
+            key="patron_busqueda_tab7"
+        )
+    
+    with col_config2:
+        st.markdown("#### 📊 Configuración de Procesamiento")
+        max_documentos_local = st.number_input(
+            "**Límite de documentos**",
+            min_value=100,
+            max_value=10000,
+            value=3000,
+            step=100,
+            help="Máximo número de documentos a procesar",
+            key="max_documentos_local_tab7"
+        )
+        
+        tamaño_lote_local = st.slider(
+            "**Tamaño del lote**",
+            min_value=50,
+            max_value=500,
+            value=100,
+            help="Documentos procesados por lote (mejora performance)",
+            key="tamaño_lote_local_tab7"
+        )
+        
+        sobrescribir_existentes_local = st.checkbox(
+            "**Sobrescribir documentos existentes**",
+            value=False,
+            help="Reemplazar documentos que ya existen en la base de datos",
+            key="sobrescribir_existentes_local_tab7"
+        )
         
         # Sección para CSV de metadatos
         st.markdown("#### 📋 Archivo CSV con Metadatos")
@@ -1773,6 +1771,7 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
