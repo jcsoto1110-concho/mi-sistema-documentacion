@@ -18,7 +18,12 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
+# Inicializar session_state para control de cache (AGREGAR ESTO AL PRINCIPIO)
+if 'last_delete_time' not in st.session_state:
+    st.session_state.last_delete_time = datetime.now().timestamp()
+if 'refresh_counter' not in st.session_state:
+    st.session_state.refresh_counter = 0
+    
 # CSS personalizado para mejorar la apariencia
 st.markdown("""
 <style>
@@ -103,6 +108,9 @@ with st.sidebar:
         try:
             client = pymongo.MongoClient(mongo_uri)
             db = client.documentation_db
+ # USAR TIMESTAMP PARA ACTUALIZAR ESTADÍSTICAS
+        cache_buster = st.session_state.get('last_delete_time', '')
+            
             total_docs = db.documentos.count_documents({})
             pdf_count = db.documentos.count_documents({"tipo": "pdf"})
             word_count = db.documentos.count_documents({"tipo": "word"})
@@ -198,7 +206,11 @@ def buscar_documentos(db, criterio_busqueda, tipo_busqueda, filtros_adicionales=
         if filtros_adicionales:
             query.update(filtros_adicionales)
         
+        # AGREGAR TIMESTAMP PARA INVALIDAR CACHE
+        cache_key = st.session_state.get('last_delete_time', '')
+        
         documentos = list(db.documentos.find(query).sort("fecha_creacion", -1))
+        
         return documentos, None
         
     except Exception as e:
@@ -220,8 +232,12 @@ def mostrar_documento(doc, key_suffix=""):
         col1, col2 = st.columns([4, 1])
         
         with col1:
-            # Header del documento
+            # Header del documento con ID
             st.markdown(f"### {icono} {doc['titulo']}")
+            
+            # MOSTRAR EL ID ÚNICO
+            doc_id = str(doc['_id'])
+            st.caption(f"**ID único:** `{doc_id}`")
             
             # Metadatos en columnas
             meta_col1, meta_col2, meta_col3 = st.columns(3)
@@ -262,17 +278,36 @@ def mostrar_documento(doc, key_suffix=""):
         with col2:
             # Botones de acción
             st.write("")  # Espacio
-            if st.button("🗑️ Eliminar", key=f"delete_{doc['_id']}_{key_suffix}", use_container_width=True):
-                with st.spinner("Eliminando..."):
-                    db.documentos.delete_one({"_id": doc["_id"]})
-                    st.success("✅ Documento eliminado")
-                    time.sleep(1)
-                    st.rerun()
             
-            if st.button("📋 Copiar ID", key=f"copy_{doc['_id']}_{key_suffix}", use_container_width=True):
-                st.code(str(doc['_id']), language='text')
-                st.success("ID copiado al portapapeles")
-
+            # BOTÓN ELIMINAR MEJORADO
+            if st.button("🗑️ Eliminar", key=f"delete_{doc['_id']}_{key_suffix}", use_container_width=True):
+                with st.spinner("Eliminando documento..."):
+                    try:
+                        # Verificar que el documento existe antes de eliminar
+                        doc_existente = db.documentos.find_one({"_id": doc["_id"]})
+                        if not doc_existente:
+                            st.error("❌ El documento ya no existe")
+                            return
+                        
+                        # Eliminar el documento
+                        result = db.documentos.delete_one({"_id": doc["_id"]})
+                        
+                        if result.deleted_count > 0:
+                            st.success("✅ Documento eliminado correctamente")
+                            
+                            # ACTUALIZAR SESSION_STATE PARA INVALIDAR CACHE
+                            st.session_state.last_delete_time = datetime.now().timestamp()
+                            st.session_state.refresh_counter += 1
+                            
+                            # Esperar y recargar
+                            time.sleep(2)
+                            st.rerun()
+                        else:
+                            st.error("❌ No se pudo eliminar el documento")
+                            
+                    except Exception as e:
+                        st.error(f"❌ Error al eliminar: {str(e)}")
+                        
 # Formulario reutilizable para documentos
 def crear_formulario_documento(tipo_documento):
     """Crea un formulario reutilizable para diferentes tipos de documentos"""
@@ -1056,6 +1091,9 @@ if mongo_uri:
                     filtros_adicionales["categoria"] = filtro_categoria_busq
                 if filtro_prioridad_busq != "Todas":
                     filtros_adicionales["prioridad"] = filtro_prioridad_busq
+     
+        # USAR TIMESTAMP PARA EVITAR CACHE
+        cache_buster = st.session_state.get('last_delete_time', '')
                 
                 documentos_encontrados, error = buscar_documentos(
                     db, criterio_busqueda, tipo_busqueda, filtros_adicionales
@@ -1140,6 +1178,9 @@ if mongo_uri:
                 ]
             
             try:
+  # USAR TIMESTAMP PARA EVITAR CACHE
+        cache_buster = st.session_state.get('last_delete_time', '')
+                
                 with st.spinner("Cargando documentos..."):
                     documentos = list(db.documentos.find(query).sort("fecha_creacion", -1))
                 
@@ -1465,3 +1506,4 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
