@@ -263,21 +263,35 @@ def mostrar_documento(doc, key_suffix=""):
             # Botones de acción
             st.write("")  # Espacio
             
-            # Botón de eliminar
+            # Botón de eliminar - SOLUCIÓN MEJORADA
             if st.button("🗑️ Eliminar", key=f"delete_{doc['_id']}_{key_suffix}", use_container_width=True):
                 with st.spinner("Eliminando..."):
                     try:
                         result = db.documentos.delete_one({"_id": doc["_id"]})
                         if result.deleted_count > 0:
                             st.success("✅ Documento eliminado")
-                            time.sleep(1)
+                            # Forzar actualización del estado
+                            if 'last_deleted' not in st.session_state:
+                                st.session_state.last_deleted = []
+                            st.session_state.last_deleted.append(str(doc['_id']))
+                            # Pausa más larga y rerun
+                            time.sleep(2)
                             st.rerun()
                         else:
-                            st.error("❌ No se pudo eliminar el documento")
+                            st.error("❌ No se pudo eliminar el documento - puede que ya no exista")
                     except Exception as e:
                         st.error(f"❌ Error al eliminar: {str(e)}")
             
-         
+            # Botón de Copiar ID
+            doc_id = str(doc['_id'])
+            if st.button("📋 Copiar ID", key=f"copy_{doc['_id']}_{key_suffix}", use_container_width=True):
+                st.text_area(
+                    "ID del documento:",
+                    value=doc_id,
+                    key=f"id_text_{doc['_id']}_{key_suffix}",
+                    height=50
+                )
+                st.success("✅ Selecciona y copia con Ctrl+C")
 
 # Formulario reutilizable para documentos
 def crear_formulario_documento(tipo_documento):
@@ -1471,6 +1485,7 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
