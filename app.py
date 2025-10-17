@@ -1794,70 +1794,6 @@ def procesar_carga_local_upload(db, archivos_subidos, df_metadatos, patron_busqu
     except Exception as e:
         st.error(f"❌ Error en el procesamiento local: {str(e)}")
 
-def procesar_archivo_local_upload(archivo, ci, metadatos_ci, config):
-    """
-    Procesa un archivo subido para la carga masiva local
-    """
-    try:
-        # Determinar tipo de archivo
-        nombre_archivo = archivo.name
-        extension = Path(nombre_archivo).suffix.lower()
-        if extension == '.pdf':
-            tipo_archivo = 'pdf'
-        elif extension in ['.docx', '.doc']:
-            tipo_archivo = 'word'
-        elif extension in ['.jpg', '.jpeg', '.png']:
-            tipo_archivo = 'imagen'
-        elif extension == '.txt':
-            tipo_archivo = 'texto'
-        else:
-            tipo_archivo = 'documento'
-        
-        # Generar título automático si no está en metadatos
-        titulo = metadatos_ci.get('titulo')
-        if not titulo:
-            nombre_sin_extension = Path(nombre_archivo).stem
-            titulo = f"{nombre_sin_extension} - {metadatos_ci['nombre']}"
-        
-        # Procesar etiquetas
-        etiquetas = []
-        if 'etiquetas' in metadatos_ci and pd.notna(metadatos_ci['etiquetas']):
-            etiquetas = [tag.strip() for tag in str(metadatos_ci['etiquetas']).split(',')]
-        
-        # Agregar etiquetas automáticas
-        etiquetas.extend([str(ci), 'carga_local', 'upload', tipo_archivo])
-        
-        # Leer contenido del archivo
-        contenido_binario = Binary(archivo.getvalue())
-        tamaño_bytes = len(contenido_binario)
-        
-        # Crear documento
-        documento = {
-            "titulo": titulo,
-            "categoria": metadatos_ci.get('categoria', 'Personal'),
-            "autor": metadatos_ci.get('autor', metadatos_ci['nombre']),
-            "ci": str(ci),
-            "nombre_completo": metadatos_ci['nombre'],
-            "version": metadatos_ci.get('version', '1.0'),
-            "tags": etiquetas,
-            "prioridad": metadatos_ci.get('prioridad', 'Media'),
-            "tipo": tipo_archivo,
-            "nombre_archivo": nombre_archivo,
-            "contenido_binario": contenido_binario,
-            "tamaño_bytes": tamaño_bytes,
-            "fecha_creacion": datetime.utcnow(),
-            "fecha_actualizacion": datetime.utcnow(),
-            "usuario_creacion": st.session_state.mongo_username,
-            "usuario_actualizacion": st.session_state.mongo_username,
-            "procesado_local": True,
-            "lote_carga": config.get('lote_id'),
-            "almacenamiento": "base_datos"  # Ahora se almacena en la base de datos
-        }
-        
-        return documento, None
-        
-    except Exception as e:
-        return None, f"Error procesando {archivo.name}: {str(e)}"
         
     
     # Previsualización del CSV - SOLO MOSTRAR, NO PROCESAR
@@ -1945,5 +1881,6 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
