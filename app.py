@@ -39,6 +39,8 @@ if 'df_metadatos_local' not in st.session_state:
     st.session_state.df_metadatos_local = None
 if 'df_metadatos_masiva' not in st.session_state:
     st.session_state.df_metadatos_masiva = None
+if 'ruta_seleccionada' not in st.session_state:
+    st.session_state.ruta_seleccionada = ""
 
 # CSS personalizado para mejorar la apariencia
 st.markdown("""
@@ -1155,6 +1157,37 @@ def crear_plantilla_carga_masiva():
     '''
     st.markdown(href, unsafe_allow_html=True)
 
+# --- FUNCIONES PARA SELECTOR DE CARPETAS ---
+
+def seleccionar_carpeta_interactivo():
+    """Abre un diálogo nativo para seleccionar carpeta (solo funciona localmente)"""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        
+        # Crear ventana tkinter oculta
+        root = tk.Tk()
+        root.withdraw()  # Ocultar ventana principal
+        root.attributes('-topmost', True)  # Traer al frente
+        
+        # Abrir diálogo de selección de carpeta
+        carpeta_seleccionada = filedialog.askdirectory(
+            title="Selecciona la carpeta con los documentos para carga local"
+        )
+        
+        # Cerrar ventana tkinter
+        root.destroy()
+        
+        if carpeta_seleccionada:
+            return carpeta_seleccionada, None
+        else:
+            return None, "No se seleccionó ninguna carpeta"
+            
+    except ImportError:
+        return None, "tkinter no está disponible en este entorno"
+    except Exception as e:
+        return None, f"Error al abrir el selector de carpetas: {str(e)}"
+
 # --- SIDEBAR MEJORADO ---
 
 with st.sidebar:
@@ -1191,6 +1224,7 @@ with st.sidebar:
         st.session_state.df_metadatos_local = None
         st.session_state.df_metadatos_masiva = None
         st.session_state.last_delete_time = datetime.now().timestamp()
+        st.session_state.ruta_seleccionada = ""
         st.success("🔓 Desconectado de la base de datos")
         st.rerun()
     
@@ -1577,7 +1611,7 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                         sobrescribir_existentes=sobrescribir_existentes
                     )
 
-    # PESTAÑA 7: Carga Masiva con Archivos Locales
+    # PESTAÑA 7: Carga Masiva con Archivos Locales (CON SELECTOR INTERACTIVO)
     with tab7:
         st.markdown("### 💾 Carga Masiva Local (Archivos en Sistema)")
         st.info(f"""
@@ -1594,39 +1628,74 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         
         with col_config1:
             st.markdown("#### 📁 Configuración de Carpetas")
-            ruta_base_local = st.text_input(
-            "**Ruta de carpeta de archivos** *",
-            value="C:/temp/subir_archivos",  # CAMBIAR AQUÍ
-            placeholder="C:/temp/subir_archivos",  # Y AQUÍ
-            help="Ruta donde están todos los archivos (se buscará recursivamente)",
-            key="ruta_base_local_tab7"
-    )
             
-       # VERIFICACIÓN INMEDIATA
-    if ruta_base_local:
-        ruta_path = Path(ruta_base_local)
-        if ruta_path.exists():
-            st.success("✅ ✅ ✅ CARPETA ENCONTRADA - Lista para usar")
-            # Mostrar contenido
-            try:
-                archivos = list(ruta_path.glob("*"))
-                if archivos:
-                    st.info(f"📁 Archivos en la carpeta: {len(archivos)}")
-                    for archivo in archivos[:5]:  # Mostrar primeros 5
-                        st.write(f"   📄 {archivo.name}")
-                    if len(archivos) > 5:
-                        st.write(f"   ... y {len(archivos) - 5} más")
-                else:
-                    st.warning("📁 Carpeta vacía - Agrega algunos archivos")
-            except Exception as e:
-                st.error(f"❌ Error al leer la carpeta: {str(e)}")
-        else:
-            st.error("❌ Carpeta NO encontrada - Verifica la ruta")
-            # Mostrar sugerencias
-            st.info("💡 **Sugerencias:**")
-            st.write("- Usa `/` en lugar de `\\` en las rutas")
-            st.write("- Ejemplo: `C:/Users/TuUsuario/Documents`")
-            st.write("- O usa rutas relativas: `./documentos`")
+            # SELECTOR INTERACTIVO DE CARPETAS
+            st.markdown("##### 🗂️ Selección de Carpeta")
+            col_sel1, col_sel2 = st.columns([3, 1])
+            
+            with col_sel1:
+                ruta_base_local = st.text_input(
+                    "**Ruta de carpeta de archivos** *",
+                    value=st.session_state.ruta_seleccionada if st.session_state.ruta_seleccionada else "./documentos",
+                    placeholder="Ruta de la carpeta o usa el selector",
+                    help="Ruta donde están todos los archivos (se buscará recursivamente)",
+                    key="ruta_base_local_tab7"
+                )
+            
+            with col_sel2:
+                st.write("")
+                st.write("")
+                if st.button("📁 Examinar", key="examinar_carpeta_tab7"):
+                    with st.spinner("Abriendo selector de carpetas..."):
+                        carpeta_seleccionada, error_selector = seleccionar_carpeta_interactivo()
+                        
+                        if error_selector:
+                            st.error(f"❌ {error_selector}")
+                            if "tkinter" in error_selector:
+                                st.info("💡 **Solución:** Ejecuta la aplicación localmente o ingresa la ruta manualmente")
+                        elif carpeta_seleccionada:
+                            st.session_state.ruta_seleccionada = carpeta_seleccionada
+                            st.success(f"✅ Carpeta seleccionada: {carpeta_seleccionada}")
+                            st.rerun()
+                        else:
+                            st.info("👈 No se seleccionó ninguna carpeta")
+            
+            # VERIFICACIÓN MEJORADA DE LA CARPETA
+            if ruta_base_local:
+                try:
+                    ruta_path = Path(ruta_base_local)
+                    
+                    if ruta_path.exists():
+                        st.success("✅ ✅ ✅ CARPETA ENCONTRADA - Lista para usar")
+                        
+                        # Mostrar contenido de la carpeta
+                        try:
+                            archivos = list(ruta_path.glob("*"))
+                            if archivos:
+                                st.info(f"📁 Contenido de la carpeta: {len(archivos)} archivos/carpetas")
+                                
+                                with st.expander("📋 Ver contenido detallado", expanded=False):
+                                    for archivo in archivos[:10]:  # Mostrar primeros 10
+                                        tipo = "📁" if archivo.is_dir() else "📄"
+                                        tamaño = f" ({archivo.stat().st_size / 1024:.1f} KB)" if archivo.is_file() else ""
+                                        st.write(f"   {tipo} {archivo.name}{tamaño}")
+                                    
+                                    if len(archivos) > 10:
+                                        st.write(f"   ... y {len(archivos) - 10} más")
+                            else:
+                                st.warning("📁 Carpeta vacía - Agrega algunos archivos para procesar")
+                                
+                        except Exception as e:
+                            st.error(f"❌ Error al leer el contenido: {str(e)}")
+                    else:
+                        st.error("❌ Carpeta NO encontrada - Verifica la ruta")
+                        st.info("💡 **Sugerencias:**")
+                        st.write("- Usa el botón '📁 Examinar' para seleccionar visualmente")
+                        st.write("- O ingresa manualmente una ruta como: `C:/Users/TuUsuario/Documents`")
+                        st.write("- O usa rutas relativas: `./documentos` (carpeta junto al script)")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error con la ruta: {str(e)}")
 
             tipos_archivo_local = st.multiselect(
                 "**Tipos de archivo a procesar** *",
@@ -1782,7 +1851,3 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
-
-
-
-
