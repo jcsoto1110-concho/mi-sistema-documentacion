@@ -1593,13 +1593,13 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         col_config1, col_config2 = st.columns(2)
         
         with col_config1:
-    st.markdown("#### 📁 Configuración de Carpetas")
-    ruta_base_local = st.text_input(
-        "**Ruta de carpeta de archivos** *",
-        value="C:/temp/subir_archivos",  # CAMBIAR AQUÍ
-        placeholder="C:/temp/subir_archivos",  # Y AQUÍ
-        help="Ruta donde están todos los archivos (se buscará recursivamente)",
-        key="ruta_base_local_tab7"
+            st.markdown("#### 📁 Configuración de Carpetas")
+            ruta_base_local = st.text_input(
+            "**Ruta de carpeta de archivos** *",
+            value="C:/temp/subir_archivos",  # CAMBIAR AQUÍ
+            placeholder="C:/temp/subir_archivos",  # Y AQUÍ
+            help="Ruta donde están todos los archivos (se buscará recursivamente)",
+            key="ruta_base_local_tab7"
     )
             
             # VERIFICACIÓN INMEDIATA
@@ -1772,5 +1772,6 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
