@@ -1602,21 +1602,31 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
             key="ruta_base_local_tab7"
     )
             
-            # VERIFICACIÓN INMEDIATA
-            if ruta_base_local:
-                ruta_path = Path(ruta_base_local)
-                if ruta_path.exists():
-                    st.success("✅ ✅ ✅ CARPETA ENCONTRADA - Lista para usar")
-                    # Mostrar contenido
-                    archivos = list(ruta_path.glob("*"))
-                    if archivos:
-                        st.info(f"📁 Archivos en la carpeta: {len(archivos)}")
-                        for archivo in archivos[:3]:  # Mostrar primeros 3
-                            st.write(f"   📄 {archivo.name}")
-                    else:
-                        st.warning("📁 Carpeta vacía - Agrega algunos archivos")
+       # VERIFICACIÓN INMEDIATA
+    if ruta_base_local:
+        ruta_path = Path(ruta_base_local)
+        if ruta_path.exists():
+            st.success("✅ ✅ ✅ CARPETA ENCONTRADA - Lista para usar")
+            # Mostrar contenido
+            try:
+                archivos = list(ruta_path.glob("*"))
+                if archivos:
+                    st.info(f"📁 Archivos en la carpeta: {len(archivos)}")
+                    for archivo in archivos[:5]:  # Mostrar primeros 5
+                        st.write(f"   📄 {archivo.name}")
+                    if len(archivos) > 5:
+                        st.write(f"   ... y {len(archivos) - 5} más")
                 else:
-                    st.error("❌ Carpeta NO encontrada - Verifica la ruta")
+                    st.warning("📁 Carpeta vacía - Agrega algunos archivos")
+            except Exception as e:
+                st.error(f"❌ Error al leer la carpeta: {str(e)}")
+        else:
+            st.error("❌ Carpeta NO encontrada - Verifica la ruta")
+            # Mostrar sugerencias
+            st.info("💡 **Sugerencias:**")
+            st.write("- Usa `/` en lugar de `\\` en las rutas")
+            st.write("- Ejemplo: `C:/Users/TuUsuario/Documents`")
+            st.write("- O usa rutas relativas: `./documentos`")
 
             tipos_archivo_local = st.multiselect(
                 "**Tipos de archivo a procesar** *",
@@ -1772,6 +1782,7 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
