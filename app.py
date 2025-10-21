@@ -13,6 +13,8 @@ from pathlib import Path
 import re
 from pathlib import Path
 import os
+import sys
+import platform
 
 # Configuración de la página
 st.set_page_config(
@@ -1157,36 +1159,51 @@ def crear_plantilla_carga_masiva():
     '''
     st.markdown(href, unsafe_allow_html=True)
 
-# --- FUNCIONES PARA SELECTOR DE CARPETAS ---
+# --- FUNCIONES PARA RUTAS ---
 
-def seleccionar_carpeta_interactivo():
-    """Abre un diálogo nativo para seleccionar carpeta (solo funciona localmente)"""
+def obtener_rutas_sugeridas():
+    """Devuelve rutas sugeridas basadas en el sistema operativo"""
+    sistema = platform.system()
+    
+    rutas_sugeridas = []
+    
+    if sistema == "Windows":
+        rutas_sugeridas = [
+            "./documentos",
+            "./data",
+            "./archivos", 
+            "C:/temp",
+            "C:/Users/Public/Documents"
+        ]
+    elif sistema == "Linux":
+        rutas_sugeridas = [
+            "./documentos",
+            "./data", 
+            "./archivos",
+            "/tmp",
+            "/home/usuario/Documentos"
+        ]
+    else:  # macOS
+        rutas_sugeridas = [
+            "./documentos",
+            "./data",
+            "./archivos",
+            "/tmp",
+            "/Users/tuusuario/Documents"
+        ]
+    
+    return rutas_sugeridas
+
+def verificar_o_crear_carpeta(ruta):
+    """Verifica si la carpeta existe, si no, la crea"""
     try:
-        import tkinter as tk
-        from tkinter import filedialog
-        
-        # Crear ventana tkinter oculta
-        root = tk.Tk()
-        root.withdraw()  # Ocultar ventana principal
-        root.attributes('-topmost', True)  # Traer al frente
-        
-        # Abrir diálogo de selección de carpeta
-        carpeta_seleccionada = filedialog.askdirectory(
-            title="Selecciona la carpeta con los documentos para carga local"
-        )
-        
-        # Cerrar ventana tkinter
-        root.destroy()
-        
-        if carpeta_seleccionada:
-            return carpeta_seleccionada, None
-        else:
-            return None, "No se seleccionó ninguna carpeta"
-            
-    except ImportError:
-        return None, "tkinter no está disponible en este entorno"
+        ruta_path = Path(ruta)
+        if not ruta_path.exists():
+            ruta_path.mkdir(parents=True, exist_ok=True)
+            return True, f"✅ Carpeta creada: {ruta}"
+        return True, f"✅ Carpeta existe: {ruta}"
     except Exception as e:
-        return None, f"Error al abrir el selector de carpetas: {str(e)}"
+        return False, f"❌ Error con la carpeta: {str(e)}"
 
 # --- SIDEBAR MEJORADO ---
 
@@ -1611,7 +1628,7 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                         sobrescribir_existentes=sobrescribir_existentes
                     )
 
-    # PESTAÑA 7: Carga Masiva con Archivos Locales (CON SELECTOR INTERACTIVO)
+    # PESTAÑA 7: Carga Masiva con Archivos Locales (VERSIÓN CORREGIDA)
     with tab7:
         st.markdown("### 💾 Carga Masiva Local (Archivos en Sistema)")
         st.info(f"""
@@ -1629,36 +1646,32 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         with col_config1:
             st.markdown("#### 📁 Configuración de Carpetas")
             
-            # SELECTOR INTERACTIVO DE CARPETAS
-            st.markdown("##### 🗂️ Selección de Carpeta")
-            col_sel1, col_sel2 = st.columns([3, 1])
+            # INFORMACIÓN SOBRE ENTORNO
+            st.info("💡 **Modo de ingreso manual** - Ingresa la ruta de la carpeta manualmente")
             
-            with col_sel1:
-                ruta_base_local = st.text_input(
-                    "**Ruta de carpeta de archivos** *",
-                    value=st.session_state.ruta_seleccionada if st.session_state.ruta_seleccionada else "./documentos",
-                    placeholder="Ruta de la carpeta o usa el selector",
-                    help="Ruta donde están todos los archivos (se buscará recursivamente)",
-                    key="ruta_base_local_tab7"
-                )
+            ruta_base_local = st.text_input(
+                "**Ruta de carpeta de archivos** *",
+                value=st.session_state.ruta_seleccionada if st.session_state.ruta_seleccionada else "./documentos",
+                placeholder="Ej: ./documentos o C:/Users/TuUsuario/Documents",
+                help="Usa './' para rutas relativas al directorio de la aplicación",
+                key="ruta_base_local_tab7"
+            )
             
-            with col_sel2:
-                st.write("")
-                st.write("")
-                if st.button("📁 Examinar", key="examinar_carpeta_tab7"):
-                    with st.spinner("Abriendo selector de carpetas..."):
-                        carpeta_seleccionada, error_selector = seleccionar_carpeta_interactivo()
-                        
-                        if error_selector:
-                            st.error(f"❌ {error_selector}")
-                            if "tkinter" in error_selector:
-                                st.info("💡 **Solución:** Ejecuta la aplicación localmente o ingresa la ruta manualmente")
-                        elif carpeta_seleccionada:
-                            st.session_state.ruta_seleccionada = carpeta_seleccionada
-                            st.success(f"✅ Carpeta seleccionada: {carpeta_seleccionada}")
-                            st.rerun()
-                        else:
-                            st.info("👈 No se seleccionó ninguna carpeta")
+            # BOTONES DE RUTAS SUGERIDAS
+            st.markdown("**Rutas sugeridas:**")
+            col_rutas = st.columns(3)
+            with col_rutas[0]:
+                if st.button("📁 ./documentos", use_container_width=True, key="ruta_docs_tab7"):
+                    st.session_state.ruta_seleccionada = "./documentos"
+                    st.rerun()
+            with col_rutas[1]:
+                if st.button("📁 ./data", use_container_width=True, key="ruta_data_tab7"):
+                    st.session_state.ruta_seleccionada = "./data"
+                    st.rerun()
+            with col_rutas[2]:
+                if st.button("📁 ./archivos", use_container_width=True, key="ruta_archivos_tab7"):
+                    st.session_state.ruta_seleccionada = "./archivos"
+                    st.rerun()
             
             # VERIFICACIÓN MEJORADA DE LA CARPETA
             if ruta_base_local:
@@ -1672,28 +1685,41 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                         try:
                             archivos = list(ruta_path.glob("*"))
                             if archivos:
-                                st.info(f"📁 Contenido de la carpeta: {len(archivos)} archivos/carpetas")
+                                st.info(f"📁 Contenido: {len(archivos)} archivos/carpetas")
                                 
                                 with st.expander("📋 Ver contenido detallado", expanded=False):
-                                    for archivo in archivos[:10]:  # Mostrar primeros 10
+                                    for archivo in archivos[:8]:  # Mostrar primeros 8
                                         tipo = "📁" if archivo.is_dir() else "📄"
-                                        tamaño = f" ({archivo.stat().st_size / 1024:.1f} KB)" if archivo.is_file() else ""
+                                        if archivo.is_file():
+                                            tamaño_bytes = archivo.stat().st_size
+                                            if tamaño_bytes > 1024*1024:  # MB
+                                                tamaño = f" ({tamaño_bytes/(1024*1024):.1f} MB)"
+                                            else:  # KB
+                                                tamaño = f" ({tamaño_bytes/1024:.1f} KB)"
+                                        else:
+                                            tamaño = ""
                                         st.write(f"   {tipo} {archivo.name}{tamaño}")
                                     
-                                    if len(archivos) > 10:
-                                        st.write(f"   ... y {len(archivos) - 10} más")
+                                    if len(archivos) > 8:
+                                        st.write(f"   ... y {len(archivos) - 8} más")
                             else:
-                                st.warning("📁 Carpeta vacía - Agrega algunos archivos para procesar")
+                                st.warning("📁 Carpeta vacía - Agrega archivos para procesar")
                                 
                         except Exception as e:
-                            st.error(f"❌ Error al leer el contenido: {str(e)}")
+                            st.error(f"❌ Error al leer contenido: {str(e)}")
                     else:
-                        st.error("❌ Carpeta NO encontrada - Verifica la ruta")
-                        st.info("💡 **Sugerencias:**")
-                        st.write("- Usa el botón '📁 Examinar' para seleccionar visualmente")
-                        st.write("- O ingresa manualmente una ruta como: `C:/Users/TuUsuario/Documents`")
-                        st.write("- O usa rutas relativas: `./documentos` (carpeta junto al script)")
+                        st.error("❌ Carpeta NO encontrada")
                         
+                        # Opción para crear carpeta automáticamente
+                        crear_carpeta = st.checkbox("¿Crear esta carpeta automáticamente?", value=True)
+                        if crear_carpeta:
+                            try:
+                                ruta_path.mkdir(parents=True, exist_ok=True)
+                                st.success(f"✅ Carpeta creada: {ruta_path.absolute()}")
+                                st.info("💡 Ahora puedes agregar archivos a esta carpeta")
+                            except Exception as e:
+                                st.error(f"❌ No se pudo crear la carpeta: {str(e)}")
+                            
                 except Exception as e:
                     st.error(f"❌ Error con la ruta: {str(e)}")
 
