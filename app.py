@@ -1171,7 +1171,7 @@ def obtener_rutas_sugeridas():
         rutas_sugeridas = [
             "./documentos",
             "./data",
-            "./archivos", 
+            "C:\\archivos", 
             "C:/temp",
             "C:/Users/Public/Documents"
         ]
@@ -1877,3 +1877,4 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
