@@ -1170,8 +1170,8 @@ def obtener_rutas_sugeridas():
     if sistema == "Windows":
         rutas_sugeridas = [
             "./documentos",
-            "./data",
-            "C:\\archivos", 
+            "./archivos",
+            "C:/archivos", 
             "C:/temp",
             "C:/Users/Public/Documents"
         ]
@@ -1877,4 +1877,5 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
+
 
