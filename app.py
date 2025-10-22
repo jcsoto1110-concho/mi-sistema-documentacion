@@ -15,7 +15,7 @@ from pathlib import Path
 import os
 import sys
 import platform
-import zipfile  # Añadir esta importación
+import zipfile
 
 # Configuración de la página
 st.set_page_config(
@@ -40,8 +40,6 @@ if 'mongo_username' not in st.session_state:
     st.session_state.mongo_username = "Desconocido"
 if 'df_metadatos_local' not in st.session_state:
     st.session_state.df_metadatos_local = None
-if 'df_metadatos_masiva' not in st.session_state:
-    st.session_state.df_metadatos_masiva = None
 if 'archivos_zip_procesados' not in st.session_state:
     st.session_state.archivos_zip_procesados = {}
 
@@ -182,7 +180,7 @@ def connect_mongodb(uri):
     except Exception as e:
         return None, False, f"Error: {str(e)}", "Desconocido"
 
-# --- FUNCIONES PARA CARGA LOCAL CON ZIP ---
+# --- FUNCIONES PARA CARGA DESDE ZIP ---
 
 def extraer_ci_desde_nombre(nombre_archivo, patron_busqueda):
     """
@@ -267,11 +265,14 @@ def buscar_archivos_en_zip(archivos_zip, tipos_archivo, max_documentos):
         st.error(f"❌ Error buscando archivos en ZIP: {str(e)}")
         return []
 
-def procesar_archivo_local_zip(archivo_nombre, archivo_memoria, ci, metadatos_ci, config):
+def procesar_archivo_desde_zip(archivo_nombre, archivo_memoria, ci, metadatos_ci, config):
     """
-    Procesa un archivo desde ZIP para la carga local
+    Procesa un archivo desde ZIP y lo guarda en la base de datos
     """
     try:
+        # Leer contenido binario desde el archivo en memoria
+        contenido_binario = Binary(archivo_memoria.getvalue())
+        
         # Determinar tipo de archivo
         extension = Path(archivo_nombre).suffix.lower()
         if extension == '.pdf':
@@ -297,13 +298,9 @@ def procesar_archivo_local_zip(archivo_nombre, archivo_memoria, ci, metadatos_ci
             etiquetas = [tag.strip() for tag in str(metadatos_ci['etiquetas']).split(',')]
         
         # Agregar etiquetas automáticas
-        etiquetas.extend([str(ci), 'carga_local', 'sistema_archivos', tipo_archivo])
+        etiquetas.extend([str(ci), 'carga_zip', 'automático', tipo_archivo])
         
-        # Obtener información del archivo
-        tamaño_bytes = len(archivo_memoria.getvalue())
-        fecha_modificacion = datetime.utcnow()
-        
-        # Crear documento (sin contenido binario, solo metadatos)
+        # Crear documento COMPLETO (con contenido binario)
         documento = {
             "titulo": titulo,
             "categoria": metadatos_ci.get('categoria', 'Personal'),
@@ -315,16 +312,16 @@ def procesar_archivo_local_zip(archivo_nombre, archivo_memoria, ci, metadatos_ci
             "prioridad": metadatos_ci.get('prioridad', 'Media'),
             "tipo": tipo_archivo,
             "nombre_archivo": Path(archivo_nombre).name,
-            "ruta_local": f"zip://{archivo_nombre}",
-            "tamaño_bytes": tamaño_bytes,
-            "fecha_modificacion_local": fecha_modificacion,
+            "contenido_binario": contenido_binario,  # ✅ SE GUARDA EL ARCHIVO
+            "tamaño_bytes": len(contenido_binario),
+            "ruta_origen_zip": f"zip://{archivo_nombre}",
             "fecha_creacion": datetime.utcnow(),
             "fecha_actualizacion": datetime.utcnow(),
             "usuario_creacion": st.session_state.mongo_username,
             "usuario_actualizacion": st.session_state.mongo_username,
-            "procesado_local": True,
+            "procesado_desde_zip": True,
             "lote_carga": config.get('lote_id'),
-            "almacenamiento": "zip"  # Indica que el archivo viene de ZIP
+            "almacenamiento": "base_datos"  # ✅ EN BASE DE DATOS
         }
         
         return documento, None
@@ -332,15 +329,15 @@ def procesar_archivo_local_zip(archivo_nombre, archivo_memoria, ci, metadatos_ci
     except Exception as e:
         return None, f"Error procesando {archivo_nombre}: {str(e)}"
 
-def procesar_carga_local_zip(db, archivos_zip, df_metadatos, tipos_archivo, max_documentos, 
-                            tamaño_lote, patron_busqueda, sobrescribir_existentes):
+def procesar_carga_desde_zip(db, archivos_zip, df_metadatos, tipos_archivo, max_documentos, 
+                           tamaño_lote, patron_busqueda, sobrescribir_existentes):
     """
-    Función principal para procesar carga masiva local desde ZIP
+    Función principal para procesar carga desde ZIP
     """
     try:
         # Configuración
         config = {
-            'lote_id': f"local_zip_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            'lote_id': f"zip_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         }
         
         # Contadores
@@ -398,16 +395,15 @@ def procesar_carga_local_zip(db, archivos_zip, df_metadatos, tipos_archivo, max_
                 if not sobrescribir_existentes:
                     existe = db.documentos.count_documents({
                         "nombre_archivo": Path(archivo_nombre).name,
-                        "ci": ci_extraido,
-                        "almacenamiento": "zip"
+                        "ci": ci_extraido
                     }) > 0
                     
                     if existe:
                         documentos_duplicados += 1
                         continue
                 
-                # Procesar archivo
-                documento, error = procesar_archivo_local_zip(archivo_nombre, archivo_memoria, ci_extraido, metadatos_ci, config)
+                # Procesar archivo (GUARDANDO CONTENIDO BINARIO)
+                documento, error = procesar_archivo_desde_zip(archivo_nombre, archivo_memoria, ci_extraido, metadatos_ci, config)
                 
                 if error:
                     documentos_fallidos += 1
@@ -445,7 +441,7 @@ def procesar_carga_local_zip(db, archivos_zip, df_metadatos, tipos_archivo, max_
         status_text.text("✅ Procesamiento completado!")
         
         with resultados_container:
-            st.markdown("### 📈 Resultados Finales - Carga Local desde ZIP")
+            st.markdown("### 📈 Resultados Finales - Carga desde ZIP")
             
             # Métricas principales
             col1, col2, col3, col4 = st.columns(4)
@@ -459,7 +455,7 @@ def procesar_carga_local_zip(db, archivos_zip, df_metadatos, tipos_archivo, max_
                 st.metric("CIs Encontrados", len(cis_encontrados))
             
             if documentos_exitosos > 0:
-                st.success(f"🎉 Carga local desde ZIP completada por {st.session_state.mongo_username}! {documentos_exitosos} documentos procesados exitosamente.")
+                st.success(f"🎉 Carga desde ZIP completada por {st.session_state.mongo_username}! {documentos_exitosos} documentos procesados exitosamente.")
                 st.balloons()
                 
                 # Mostrar detalles adicionales
@@ -484,227 +480,9 @@ def procesar_carga_local_zip(db, archivos_zip, df_metadatos, tipos_archivo, max_
                           "Verifica que los nombres de archivo contengan el CI y que el CSV tenga los metadatos correspondientes.")
                 
     except Exception as e:
-        st.error(f"❌ Error en el procesamiento local desde ZIP: {str(e)}")
+        st.error(f"❌ Error en el procesamiento desde ZIP: {str(e)}")
 
-# --- FUNCIONES PARA CARGA MASIVA CON ZIP ---
-
-def buscar_archivos_por_ci_zip(archivos_zip, ci, tipos_archivo):
-    """Busca archivos para un CI específico en el ZIP"""
-    try:
-        ci_str = str(ci).strip()
-        archivos_ci = []
-        
-        for archivo_nombre, archivo_memoria in archivos_zip.items():
-            # Buscar archivos que contengan el CI en el nombre o path
-            if ci_str in archivo_nombre:
-                extension = Path(archivo_nombre).suffix.lower()
-                if extension in tipos_archivo:
-                    archivos_ci.append((archivo_nombre, archivo_memoria))
-        
-        return archivos_ci
-    
-    except Exception as e:
-        return []
-
-def procesar_archivo_masivo_zip(archivo_nombre, archivo_memoria, ci, metadatos_ci, config):
-    """Procesa un archivo individual desde ZIP para la carga masiva"""
-    try:
-        # Leer contenido binario desde el archivo en memoria
-        contenido_binario = Binary(archivo_memoria.getvalue())
-        
-        # Determinar tipo de archivo
-        extension = Path(archivo_nombre).suffix.lower()
-        if extension == '.pdf':
-            tipo_archivo = 'pdf'
-        elif extension in ['.docx', '.doc']:
-            tipo_archivo = 'word'
-        elif extension in ['.jpg', '.jpeg', '.png']:
-            tipo_archivo = 'imagen'
-        elif extension == '.txt':
-            tipo_archivo = 'texto'
-        else:
-            tipo_archivo = 'documento'
-        
-        # Generar título automático si no está en metadatos
-        titulo = metadatos_ci.get('titulo')
-        if not titulo:
-            nombre_archivo = Path(archivo_nombre).stem
-            titulo = f"{nombre_archivo} - {metadatos_ci['nombre']}"
-        
-        # Procesar etiquetas
-        etiquetas = []
-        if 'etiquetas' in metadatos_ci and pd.notna(metadatos_ci['etiquetas']):
-            etiquetas = [tag.strip() for tag in str(metadatos_ci['etiquetas']).split(',')]
-        
-        # Agregar etiquetas automáticas
-        etiquetas.extend([str(ci), 'carga_masiva', 'automático', tipo_archivo, 'zip'])
-        
-        # Crear documento
-        documento = {
-            "titulo": titulo,
-            "categoria": metadatos_ci.get('categoria', 'Personal'),
-            "autor": metadatos_ci.get('autor', metadatos_ci['nombre']),
-            "ci": str(ci),
-            "nombre_completo": metadatos_ci['nombre'],
-            "version": metadatos_ci.get('version', '1.0'),
-            "tags": etiquetas,
-            "prioridad": metadatos_ci.get('prioridad', 'Media'),
-            "tipo": tipo_archivo,
-            "nombre_archivo": Path(archivo_nombre).name,
-            "contenido_binario": contenido_binario,
-            "tamaño_bytes": len(contenido_binario),
-            "ruta_original": f"zip://{archivo_nombre}",
-            "fecha_creacion": datetime.utcnow(),
-            "fecha_actualizacion": datetime.utcnow(),
-            "usuario_creacion": st.session_state.mongo_username,
-            "usuario_actualizacion": st.session_state.mongo_username,
-            "procesado_masivo": True,
-            "lote_carga": config.get('lote_id'),
-            "almacenamiento": "base_datos"
-        }
-        
-        return documento, None
-        
-    except Exception as e:
-        return None, f"Error procesando {archivo_nombre}: {str(e)}"
-
-def procesar_carga_masiva_ci_zip(db, archivos_zip, df_metadatos, tipos_archivo, max_documentos, 
-                               tamaño_lote, sobrescribir_existentes):
-    """Función principal para procesar carga masiva por CI desde ZIP"""
-    
-    try:
-        # Configuración
-        config = {
-            'lote_id': f"masivo_zip_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        }
-        
-        # Contadores
-        total_archivos = 0
-        archivos_procesados = 0
-        documentos_exitosos = 0
-        documentos_fallidos = 0
-        documentos_duplicados = 0
-        cis_procesados = 0
-        
-        # Lista para almacenar todos los documentos a procesar
-        todos_documentos = []
-        
-        st.info("🔍 Buscando archivos en ZIP por CI...")
-        
-        # Buscar archivos para cada CI en el CSV
-        for _, fila in df_metadatos.iterrows():
-            ci = fila['ci']
-            archivos_ci = buscar_archivos_por_ci_zip(archivos_zip, ci, tipos_archivo)
-            
-            if archivos_ci:
-                cis_procesados += 1
-                for archivo_nombre, archivo_memoria in archivos_ci:
-                    if total_archivos < max_documentos:
-                        todos_documentos.append((archivo_nombre, archivo_memoria, ci, fila.to_dict()))
-                        total_archivos += 1
-                    else:
-                        break
-            
-            if total_archivos >= max_documentos:
-                break
-        
-        if not todos_documentos:
-            st.warning("⚠️ No se encontraron archivos para procesar en el ZIP")
-            return
-        
-        st.success(f"🎯 Encontrados {total_archivos} archivos para {cis_procesados} CIs diferentes en el ZIP")
-        
-        # Configurar interfaz de progreso
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        resultados_container = st.container()
-        
-        # Procesar por lotes
-        for i in range(0, len(todos_documentos), tamaño_lote):
-            lote_actual = todos_documentos[i:i + tamaño_lote]
-            documentos_a_insertar = []
-            
-            for archivo_nombre, archivo_memoria, ci, metadatos in lote_actual:
-                # Verificar duplicados si no se permite sobrescribir
-                if not sobrescribir_existentes:
-                    existe = db.documentos.count_documents({
-                        "nombre_archivo": Path(archivo_nombre).name,
-                        "ci": str(ci)
-                    }) > 0
-                    
-                    if existe:
-                        documentos_duplicados += 1
-                        continue
-                
-                # Procesar archivo
-                documento, error = procesar_archivo_masivo_zip(archivo_nombre, archivo_memoria, ci, metadatos, config)
-                
-                if error:
-                    documentos_fallidos += 1
-                    st.error(error)
-                else:
-                    documentos_a_insertar.append(documento)
-            
-            # Insertar lote en MongoDB
-            if documentos_a_insertar:
-                try:
-                    result = db.documentos.insert_many(documentos_a_insertar, ordered=False)
-                    documentos_exitosos += len(result.inserted_ids)
-                except Exception as e:
-                    documentos_fallidos += len(documentos_a_insertar)
-                    st.error(f"Error insertando lote: {str(e)}")
-            
-            archivos_procesados += len(lote_actual)
-            
-            # Actualizar progreso
-            progreso = archivos_procesados / len(todos_documentos)
-            progress_bar.progress(progreso)
-            status_text.text(
-                f"📊 Progreso: {archivos_procesados}/{len(todos_documentos)} | "
-                f"✅ Exitosos: {documentos_exitosos} | "
-                f"❌ Fallidos: {documentos_fallidos} | "
-                f"⚡ Duplicados: {documentos_duplicados}"
-            )
-            
-            # Pequeña pausa para no sobrecargar
-            time.sleep(0.1)
-        
-        # Mostrar resultados finales
-        progress_bar.progress(1.0)
-        status_text.text("✅ Procesamiento completado!")
-        
-        with resultados_container:
-            st.markdown("### 📈 Resultados Finales - Carga Masiva desde ZIP")
-            
-            # Métricas principales
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Archivos Encontrados", len(todos_documentos))
-            with col2:
-                st.metric("Procesados Exitosos", documentos_exitosos)
-            with col3:
-                st.metric("Fallidos", documentos_fallidos)
-            with col4:
-                st.metric("CIs Procesados", cis_procesados)
-            
-            if documentos_exitosos > 0:
-                st.success(f"🎉 Carga masiva desde ZIP completada por {st.session_state.mongo_username}! {documentos_exitosos} documentos procesados exitosamente.")
-                st.balloons()
-                
-                # Actualizar estadísticas
-                st.session_state.last_delete_time = datetime.now().timestamp()
-            
-            if documentos_duplicados > 0:
-                st.info(f"💡 {documentos_duplicados} documentos no se procesaron por duplicados. "
-                       "Marca 'Sobrescribir documentos existentes' para forzar el reprocesamiento.")
-                
-    except Exception as e:
-        st.error(f"❌ Error en el procesamiento masivo desde ZIP: {str(e)}")
-
-# ... (MANTENER TODAS LAS FUNCIONES ORIGINALES EXCEPTO LAS DE CARGA LOCAL Y MASIVA)
-
-# Las funciones originales de procesamiento de archivos, búsqueda, etc. se mantienen igual
-# Solo reemplazamos las funciones de carga local y masiva
+# ... (MANTENER TODAS LAS FUNCIONES ORIGINALES DE PROCESAMIENTO DE ARCHIVOS, BÚSQUEDA, ETC.)
 
 def procesar_archivo(archivo, tipo_archivo):
     try:
@@ -802,12 +580,11 @@ def mostrar_documento_compacto(doc, key_suffix=""):
                 st.markdown(f'<div class="compact-metadata">📅 **Creado:** {doc["fecha_creacion"].strftime("%d/%m/%Y")}</div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="compact-metadata">👥 **Por:** {doc.get("usuario_creacion", "N/A")}</div>', unsafe_allow_html=True)
             
-            if doc.get('almacenamiento') == 'zip':
-                st.markdown(f'<div class="compact-metadata">💾 **Almacenamiento:** Archivo ZIP</div>', unsafe_allow_html=True)
-            elif doc.get('almacenamiento') == 'local':
-                st.markdown(f'<div class="compact-metadata">💾 **Almacenamiento:** Local ({doc.get("ruta_local", "N/A")})</div>', unsafe_allow_html=True)
-            else:
+            if doc.get('almacenamiento') == 'base_datos':
                 st.markdown(f'<div class="compact-metadata">💾 **Almacenamiento:** Base de datos</div>', unsafe_allow_html=True)
+            
+            if doc.get('procesado_desde_zip'):
+                st.markdown(f'<div class="compact-metadata">📦 **Origen:** Archivo ZIP</div>', unsafe_allow_html=True)
             
             if doc.get('fecha_actualizacion') and doc.get('usuario_actualizacion'):
                 st.markdown(f'<div class="compact-metadata">✏️ **Actualizado:** {doc["fecha_actualizacion"].strftime("%d/%m/%Y")} por {doc["usuario_actualizacion"]}</div>', unsafe_allow_html=True)
@@ -825,15 +602,14 @@ def mostrar_documento_compacto(doc, key_suffix=""):
                     tamaño_mb = doc['tamaño_bytes'] / (1024 * 1024)
                     st.markdown(f'<div class="compact-metadata">💾 **Tamaño:** {tamaño_mb:.2f} MB</div>', unsafe_allow_html=True)
                 
-                if doc.get('contenido_binario') and doc.get('almacenamiento') != 'zip':
+                # ✅ BOTÓN DE DESCARGA DISPONIBLE (porque se guardó contenido_binario)
+                if doc.get('contenido_binario'):
                     boton_descarga = crear_boton_descarga(
                         doc['contenido_binario'],
                         doc['nombre_archivo'],
                         doc['tipo']
                     )
                     st.markdown(boton_descarga, unsafe_allow_html=True)
-                elif doc.get('almacenamiento') == 'zip':
-                    st.markdown(f'<div class="compact-metadata">📍 **Archivo en ZIP:** No disponible para descarga directa</div>', unsafe_allow_html=True)
             
             st.markdown(f'<div class="compact-metadata" style="font-size: 0.7rem; color: #999;">🆔 **ID:** {doc_id[:12]}...</div>', unsafe_allow_html=True)
         
@@ -1172,7 +948,6 @@ with st.sidebar:
         st.session_state.current_user = "No conectado"
         st.session_state.mongo_username = "Desconocido"
         st.session_state.df_metadatos_local = None
-        st.session_state.df_metadatos_masiva = None
         st.session_state.last_delete_time = datetime.now().timestamp()
         st.session_state.archivos_zip_procesados = {}
         st.success("🔓 Desconectado de la base de datos")
@@ -1203,7 +978,7 @@ with st.sidebar:
             word_count = db.documentos.count_documents({"tipo": "word"})
             text_count = db.documentos.count_documents({"tipo": "texto"})
             image_count = db.documentos.count_documents({"tipo": "imagen"})
-            zip_count = db.documentos.count_documents({"almacenamiento": "zip"})
+            zip_count = db.documentos.count_documents({"procesado_desde_zip": True})
             usuarios_activos = db.documentos.distinct("usuario_creacion")
             
             st.markdown("### 📊 Estadísticas")
@@ -1219,7 +994,7 @@ with st.sidebar:
                 st.metric("🖼️ Imágenes", image_count)
             
             st.metric("👥 Usuarios Activos", len(usuarios_activos))
-            st.metric("📦 Archivos ZIP", zip_count)
+            st.metric("📦 Desde ZIP", zip_count)
                 
         except Exception as e:
             st.error(f"❌ Error obteniendo estadísticas: {str(e)}")
@@ -1240,14 +1015,14 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
     st.markdown("---")
     st.markdown("## 📁 Gestión de Documentos")
     
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    # ✅ SOLO 5 PESTAÑAS AHORA (ELIMINADA PESTAÑA 6)
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🔍 Buscar Documentos", 
         "📝 Crear Texto", 
         "📄 Subir PDF", 
         "📝 Subir Word", 
         "📂 Todos los Documentos",
-        "🚀 Carga Masiva ZIP",
-        "💾 Carga Local ZIP"
+        "🚀 Carga desde ZIP"  # ✅ NUEVA PESTAÑA ÚNICA PARA ZIP
     ])
     
     # PESTAÑA 1: BÚSQUEDA AVANZADA
@@ -1385,13 +1160,14 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         except Exception as e:
             st.error(f"❌ Error al cargar documentos: {str(e)}")
     
-    # PESTAÑA 6: Carga Masiva por CI CON ZIP
+    # ✅ PESTAÑA 6: CARGA DESDE ZIP (ÚNICA)
     with tab6:
         st.markdown("### 🚀 Carga Masiva desde ZIP")
         st.info(f"""
         **Carga masiva de documentos desde archivo ZIP**
         - Sube un ZIP con documentos organizados
-        - Los documentos se almacenan en la base de datos
+        - Los archivos se guardan COMPLETOS en la base de datos ✅
+        - Podrás descargarlos después desde la aplicación ✅
         - Soporta: PDF, Word, imágenes, texto
         - Hasta 10,000 documentos por carga
         - **Usuario de BD:** 👤 {st.session_state.mongo_username}
@@ -1403,190 +1179,27 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         with col_config1:
             st.markdown("#### 📦 Subir Archivo ZIP")
             
-            archivo_zip_masivo = st.file_uploader(
+            archivo_zip = st.file_uploader(
                 "**Selecciona archivo ZIP** *",
                 type=['zip'],
                 help="ZIP con documentos organizados",
-                key="archivo_zip_masivo_tab6"
+                key="archivo_zip_tab6"
             )
             
-            if archivo_zip_masivo:
+            if archivo_zip:
                 # Extraer y mostrar información del ZIP
-                archivos_zip, error_zip = extraer_archivos_desde_zip(archivo_zip_masivo)
+                archivos_zip, error_zip = extraer_archivos_desde_zip(archivo_zip)
                 
                 if error_zip:
                     st.error(f"❌ {error_zip}")
                 else:
-                    st.session_state.archivos_zip_procesados['masivo'] = archivos_zip
-                    st.success(f"✅ ZIP procesado: {len(archivos_zip)} archivos extraídos")
-                    
-                    with st.expander("📋 Ver contenido del ZIP", expanded=True):
-                        st.write(f"**Total de archivos:** {len(archivos_zip)}")
-                        for i, (nombre, archivo) in enumerate(list(archivos_zip.items())[:10]):
-                            tamaño_mb = len(archivo.getvalue()) / (1024 * 1024)
-                            st.write(f"{i+1}. 📄 {nombre} ({tamaño_mb:.2f} MB)")
-                        if len(archivos_zip) > 10:
-                            st.write(f"... y {len(archivos_zip) - 10} archivos más")
-            
-            tipos_archivo = st.multiselect(
-                "**Tipos de archivo a procesar** *",
-                ['.pdf', '.docx', '.doc', '.jpg', '.jpeg', '.png', '.txt'],
-                default=['.pdf', '.docx', '.doc'],
-                help="Selecciona los tipos de archivo a incluir",
-                key="tipos_archivo_tab6"
-            )
-        
-        with col_config2:
-            st.markdown("#### 📊 Configuración de Procesamiento")
-            max_documentos = st.number_input(
-                "**Límite de documentos**",
-                min_value=100,
-                max_value=10000,
-                value=3000,
-                step=100,
-                help="Máximo número de documentos a procesar",
-                key="max_documentos_tab6"
-            )
-            
-            tamaño_lote = st.slider(
-                "**Tamaño del lote**",
-                min_value=50,
-                max_value=500,
-                value=100,
-                help="Documentos procesados por lote (mejora performance)",
-                key="tamaño_lote_tab6"
-            )
-            
-            sobrescribir_existentes = st.checkbox(
-                "**Sobrescribir documentos existentes**",
-                value=False,
-                help="Reemplazar documentos que ya existen en la base de datos",
-                key="sobrescribir_existentes_tab6"
-            )
-        
-        # Sección para CSV de metadatos
-        st.markdown("#### 📋 Archivo CSV con Metadatos")
-        st.info("""
-        **El CSV debe contener las columnas:**
-        - `ci` (obligatorio): Número de cédula
-        - `nombre` (obligatorio): Nombre completo
-        - `titulo`: Título del documento
-        - `categoria`: Categoría del documento
-        - `autor`: Autor del documento  
-        - `version`: Versión del documento
-        - `etiquetas`: Tags separados por comas
-        - `prioridad`: Baja, Media, Alta
-        """)
-        
-        archivo_csv = st.file_uploader(
-            "**Subir CSV con metadatos** *",
-            type=['csv'],
-            help="CSV con información de CI, nombres, títulos, etc.",
-            key="archivo_csv_tab6"
-        )
-        
-        if archivo_csv:
-            try:
-                content = archivo_csv.getvalue().decode('utf-8')
-                lines = content.split('\n')
-                
-                st.success(f"✅ Archivo CSV cargado: {len(lines)} líneas detectadas")
-                
-                with st.expander("📊 Vista previa del CSV (primeras 5 líneas)", expanded=True):
-                    st.write("**Contenido del CSV:**")
-                    for i, line in enumerate(lines[:6]):
-                        st.text(f"Línea {i+1}: {line}")
-                
-                if st.button("🔍 Validar estructura del CSV", key="validar_csv_tab6"):
-                    with st.spinner("Validando CSV..."):
-                        archivo_csv.seek(0)
-                        df_metadatos, error_csv = cargar_y_validar_csv(archivo_csv, "carga masiva")
-                        
-                        if error_csv:
-                            st.error(f"❌ Error en el CSV: {error_csv}")
-                        else:
-                            st.session_state.df_metadatos_masiva = df_metadatos
-                            st.success(f"✅ CSV validado correctamente: {len(df_metadatos)} registros de {df_metadatos['ci'].nunique()} CIs diferentes")
-                            
-                            with st.expander("📋 Resumen del CSV validado", expanded=True):
-                                st.dataframe(df_metadatos.head(), use_container_width=True)
-                                st.write(f"**Total de registros:** {len(df_metadatos)}")
-                                st.write(f"**CIs únicos:** {df_metadatos['ci'].nunique()}")
-                                st.write(f"**Columnas:** {list(df_metadatos.columns)}")
-            
-            except Exception as e:
-                st.error(f"❌ Error al leer el CSV: {str(e)}")
-        
-        st.markdown("---")
-        st.markdown("#### 🧪 Generar Plantilla")
-        crear_plantilla_carga_masiva()
-        
-        st.markdown("#### ⚡ Procesamiento Masivo desde ZIP")
-        
-        if st.button("🚀 Iniciar Carga Masiva desde ZIP", type="primary", use_container_width=True, key="btn_carga_masiva_tab6"):
-            if 'masivo' not in st.session_state.archivos_zip_procesados:
-                st.error("❌ Primero debes subir y procesar un archivo ZIP")
-            elif st.session_state.df_metadatos_masiva is None:
-                st.error("❌ Primero debes validar el CSV usando el botón 'Validar estructura del CSV'")
-            elif not tipos_archivo:
-                st.error("❌ Debes seleccionar al menos un tipo de archivo")
-            else:
-                archivos_zip = st.session_state.archivos_zip_procesados['masivo']
-                df_metadatos = st.session_state.df_metadatos_masiva
-                
-                st.info(f"📋 **Resumen a procesar:** {len(archivos_zip)} archivos en ZIP, {len(df_metadatos)} registros de {df_metadatos['ci'].nunique()} CIs")
-                
-                with st.spinner("🔄 Iniciando procesamiento masivo desde ZIP..."):
-                    resultado = procesar_carga_masiva_ci_zip(
-                        db=db,
-                        archivos_zip=archivos_zip,
-                        df_metadatos=df_metadatos,
-                        tipos_archivo=tipos_archivo,
-                        max_documentos=max_documentos,
-                        tamaño_lote=tamaño_lote,
-                        sobrescribir_existentes=sobrescribir_existentes
-                    )
-
-    # PESTAÑA 7: Carga Local CON ZIP (VERSIÓN STREAMLIT CLOUD)
-    with tab7:
-        st.markdown("### 💾 Carga Local desde ZIP")
-        st.info(f"""
-        **Carga masiva manteniendo referencia a archivos en ZIP**
-        - Sube un ZIP con todos los documentos
-        - Solo los metadatos se almacenan en MongoDB
-        - Los archivos permanecen referenciados desde el ZIP
-        - Soporta: PDF, Word, imágenes, texto
-        - Hasta 10,000 documentos por carga
-        - **Usuario de BD:** 👤 {st.session_state.mongo_username}
-        """)
-        
-        # Configuración
-        col_config1, col_config2 = st.columns(2)
-        
-        with col_config1:
-            st.markdown("#### 📦 Subir Archivo ZIP")
-            
-            archivo_zip_local = st.file_uploader(
-                "**Selecciona archivo ZIP con documentos** *",
-                type=['zip'],
-                help="ZIP conteniendo todos los documentos a procesar",
-                key="archivo_zip_local_tab7"
-            )
-            
-            if archivo_zip_local:
-                # Extraer y mostrar información del ZIP
-                archivos_zip, error_zip = extraer_archivos_desde_zip(archivo_zip_local)
-                
-                if error_zip:
-                    st.error(f"❌ {error_zip}")
-                else:
-                    st.session_state.archivos_zip_procesados['local'] = archivos_zip
+                    st.session_state.archivos_zip_procesados = archivos_zip
                     st.success(f"✅ ZIP procesado: {len(archivos_zip)} archivos extraídos")
                     
                     # Mostrar estadísticas del ZIP
                     with st.expander("📊 Estadísticas del ZIP", expanded=True):
                         st.markdown(f'<div class="zip-info">', unsafe_allow_html=True)
-                        st.write(f"**📦 Archivo ZIP:** {archivo_zip_local.name}")
+                        st.write(f"**📦 Archivo ZIP:** {archivo_zip.name}")
                         st.write(f"**📄 Total de archivos:** {len(archivos_zip)}")
                         
                         # Contar por tipo
@@ -1627,47 +1240,47 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                         if len(archivos_zip) > 15:
                             st.write(f"... y {len(archivos_zip) - 15} archivos más")
             
-            tipos_archivo_local = st.multiselect(
+            tipos_archivo = st.multiselect(
                 "**Tipos de archivo a procesar** *",
                 ['.pdf', '.docx', '.doc', '.jpg', '.jpeg', '.png', '.txt'],
                 default=['.pdf', '.docx', '.doc'],
                 help="Selecciona los tipos de archivo a incluir",
-                key="tipos_archivo_local_tab7"
+                key="tipos_archivo_tab6"
             )
             
             patron_busqueda = st.selectbox(
                 "**Patrón de búsqueda de CI** *",
                 ["CI al inicio", "CI en cualquier parte", "CI específico en nombre"],
                 help="Cómo buscar el CI en los nombres de archivo",
-                key="patron_busqueda_tab7"
+                key="patron_busqueda_tab6"
             )
         
         with col_config2:
             st.markdown("#### 📊 Configuración de Procesamiento")
-            max_documentos_local = st.number_input(
+            max_documentos = st.number_input(
                 "**Límite de documentos**",
                 min_value=100,
                 max_value=10000,
                 value=3000,
                 step=100,
                 help="Máximo número de documentos a procesar",
-                key="max_documentos_local_tab7"
+                key="max_documentos_tab6"
             )
             
-            tamaño_lote_local = st.slider(
+            tamaño_lote = st.slider(
                 "**Tamaño del lote**",
                 min_value=50,
                 max_value=500,
                 value=100,
                 help="Documentos procesados por lote (mejora performance)",
-                key="tamaño_lote_local_tab7"
+                key="tamaño_lote_tab6"
             )
             
-            sobrescribir_existentes_local = st.checkbox(
+            sobrescribir_existentes = st.checkbox(
                 "**Sobrescribir documentos existentes**",
                 value=False,
                 help="Reemplazar documentos que ya existen en la base de datos",
-                key="sobrescribir_existentes_local_tab7"
+                key="sobrescribir_existentes_tab6"
             )
         
         # Sección para CSV de metadatos
@@ -1689,16 +1302,16 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         - `CI_12345678_identificacion.jpg` (CI específico)
         """)
         
-        archivo_csv_local = st.file_uploader(
+        archivo_csv = st.file_uploader(
             "**Subir CSV con metadatos** *",
             type=['csv'],
             help="CSV con información de CI, nombres, títulos, etc.",
-            key="archivo_csv_local_tab7"
+            key="archivo_csv_tab6"
         )
         
-        if archivo_csv_local:
+        if archivo_csv:
             try:
-                content = archivo_csv_local.getvalue().decode('utf-8')
+                content = archivo_csv.getvalue().decode('utf-8')
                 lines = content.split('\n')
                 
                 st.success(f"✅ Archivo CSV cargado: {len(lines)} líneas detectadas")
@@ -1708,52 +1321,56 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                     for i, line in enumerate(lines[:6]):
                         st.text(f"Línea {i+1}: {line}")
                 
-                if st.button("🔍 Validar estructura del CSV", key="validar_csv_tab7"):
+                if st.button("🔍 Validar estructura del CSV", key="validar_csv_tab6"):
                     with st.spinner("Validando CSV..."):
-                        archivo_csv_local.seek(0)
-                        df_metadatos_local, error_csv = cargar_y_validar_csv(archivo_csv_local, "carga local")
+                        archivo_csv.seek(0)
+                        df_metadatos, error_csv = cargar_y_validar_csv(archivo_csv, "carga desde ZIP")
                         
                         if error_csv:
                             st.error(f"❌ Error en el CSV: {error_csv}")
                         else:
-                            st.session_state.df_metadatos_local = df_metadatos_local
-                            st.success(f"✅ CSV validado correctamente: {len(df_metadatos_local)} registros de {df_metadatos_local['ci'].nunique()} CIs diferentes")
+                            st.session_state.df_metadatos_local = df_metadatos
+                            st.success(f"✅ CSV validado correctamente: {len(df_metadatos)} registros de {df_metadatos['ci'].nunique()} CIs diferentes")
                             
                             with st.expander("📋 Resumen del CSV validado", expanded=True):
-                                st.dataframe(df_metadatos_local.head(), use_container_width=True)
-                                st.write(f"**Total de registros:** {len(df_metadatos_local)}")
-                                st.write(f"**CIs únicos:** {df_metadatos_local['ci'].nunique()}")
-                                st.write(f"**Columnas:** {list(df_metadatos_local.columns)}")
+                                st.dataframe(df_metadatos.head(), use_container_width=True)
+                                st.write(f"**Total de registros:** {len(df_metadatos)}")
+                                st.write(f"**CIs únicos:** {df_metadatos['ci'].nunique()}")
+                                st.write(f"**Columnas:** {list(df_metadatos.columns)}")
             
             except Exception as e:
                 st.error(f"❌ Error al leer el CSV: {str(e)}")
         
-        # Botón de procesamiento
-        st.markdown("#### ⚡ Procesamiento Local desde ZIP")
+        st.markdown("---")
+        st.markdown("#### 🧪 Generar Plantilla")
+        crear_plantilla_carga_masiva()
         
-        if st.button("🚀 Iniciar Carga Local desde ZIP", type="primary", use_container_width=True, key="btn_carga_local_tab7"):
-            if 'local' not in st.session_state.archivos_zip_procesados:
+        # Botón de procesamiento
+        st.markdown("#### ⚡ Procesamiento desde ZIP")
+        
+        if st.button("🚀 Iniciar Carga desde ZIP", type="primary", use_container_width=True, key="btn_carga_zip_tab6"):
+            if not st.session_state.archivos_zip_procesados:
                 st.error("❌ Primero debes subir y procesar un archivo ZIP")
             elif st.session_state.df_metadatos_local is None:
                 st.error("❌ Primero debes validar el CSV usando el botón 'Validar estructura del CSV'")
-            elif not tipos_archivo_local:
+            elif not tipos_archivo:
                 st.error("❌ Debes seleccionar al menos un tipo de archivo")
             else:
-                archivos_zip = st.session_state.archivos_zip_procesados['local']
-                df_metadatos_local = st.session_state.df_metadatos_local
+                archivos_zip = st.session_state.archivos_zip_procesados
+                df_metadatos = st.session_state.df_metadatos_local
                 
-                st.info(f"📋 **Resumen a procesar:** {len(archivos_zip)} archivos en ZIP, {len(df_metadatos_local)} registros de {df_metadatos_local['ci'].nunique()} CIs")
+                st.info(f"📋 **Resumen a procesar:** {len(archivos_zip)} archivos en ZIP, {len(df_metadatos)} registros de {df_metadatos['ci'].nunique()} CIs")
                 
-                with st.spinner("🔄 Iniciando procesamiento local desde ZIP..."):
-                    resultado = procesar_carga_local_zip(
+                with st.spinner("🔄 Iniciando procesamiento desde ZIP..."):
+                    resultado = procesar_carga_desde_zip(
                         db=db,
                         archivos_zip=archivos_zip,
-                        df_metadatos=df_metadatos_local,
-                        tipos_archivo=tipos_archivo_local,
-                        max_documentos=max_documentos_local,
-                        tamaño_lote=tamaño_lote_local,
+                        df_metadatos=df_metadatos,
+                        tipos_archivo=tipos_archivo,
+                        max_documentos=max_documentos,
+                        tamaño_lote=tamaño_lote,
                         patron_busqueda=patron_busqueda,
-                        sobrescribir_existentes=sobrescribir_existentes_local
+                        sobrescribir_existentes=sobrescribir_existentes
                     )
 
 else:
