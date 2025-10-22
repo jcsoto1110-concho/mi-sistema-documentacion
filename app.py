@@ -15,6 +15,7 @@ from pathlib import Path
 import os
 import sys
 import platform
+import zipfile  # Añadir esta importación
 
 # Configuración de la página
 st.set_page_config(
@@ -41,8 +42,8 @@ if 'df_metadatos_local' not in st.session_state:
     st.session_state.df_metadatos_local = None
 if 'df_metadatos_masiva' not in st.session_state:
     st.session_state.df_metadatos_masiva = None
-if 'ruta_seleccionada' not in st.session_state:
-    st.session_state.ruta_seleccionada = ""
+if 'archivos_zip_procesados' not in st.session_state:
+    st.session_state.archivos_zip_procesados = {}
 
 # CSS personalizado para mejorar la apariencia
 st.markdown("""
@@ -134,6 +135,13 @@ st.markdown("""
         display: inline-block;
         margin-bottom: 10px;
     }
+    .zip-info {
+        background-color: #e3f2fd;
+        padding: 10px;
+        border-radius: 5px;
+        border-left: 4px solid #2196f3;
+        margin: 5px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -151,16 +159,13 @@ def connect_mongodb(uri):
         # Extraer nombre de usuario de la URI
         username = "Desconocido"
         try:
-            # Intentar extraer usuario de la URI de conexión
             if "mongodb+srv://" in uri:
-                # Formato: mongodb+srv://usuario:contraseña@cluster...
                 user_part = uri.split("mongodb+srv://")[1].split(":")[0]
                 if "@" in user_part:
                     username = user_part.split("@")[0]
                 else:
                     username = user_part
             elif "mongodb://" in uri:
-                # Formato: mongodb://usuario:contraseña@host...
                 user_part = uri.split("mongodb://")[1].split(":")[0]
                 if "@" in user_part:
                     username = user_part.split("@")[0]
@@ -177,30 +182,26 @@ def connect_mongodb(uri):
     except Exception as e:
         return None, False, f"Error: {str(e)}", "Desconocido"
 
-# --- FUNCIONES PARA CARGA LOCAL ---
+# --- FUNCIONES PARA CARGA LOCAL CON ZIP ---
 
 def extraer_ci_desde_nombre(nombre_archivo, patron_busqueda):
     """
     Extrae el CI del nombre del archivo según el patrón especificado
     """
     try:
-        # Eliminar la extensión del archivo
         nombre_sin_extension = Path(nombre_archivo).stem
         
         if patron_busqueda == "CI al inicio":
-            # Buscar números al inicio del nombre (8-10 dígitos típicos de CI)
             match = re.match(r'^(\d{8,10})', nombre_sin_extension)
             if match:
                 return match.group(1)
         
         elif patron_busqueda == "CI en cualquier parte":
-            # Buscar números en cualquier parte del nombre
             matches = re.findall(r'\d{8,10}', nombre_sin_extension)
             if matches:
-                return matches[0]  # Tomar el primer CI encontrado
+                return matches[0]
         
         elif patron_busqueda == "CI específico en nombre":
-            # Buscar patrones comunes como CI_12345678 o 12345678_nombre
             patterns = [
                 r'CI[_\-\s]*(\d{8,10})',
                 r'(\d{8,10})[_\-\s]',
@@ -216,34 +217,63 @@ def extraer_ci_desde_nombre(nombre_archivo, patron_busqueda):
     except Exception as e:
         return None
 
-def buscar_archivos_locales(ruta_base, tipos_archivo, max_documentos):
+def extraer_archivos_desde_zip(archivo_zip):
     """
-    Busca archivos en la ruta especificada
+    Extrae todos los archivos de un ZIP y los devuelve en memoria
     """
     try:
-        ruta = Path(ruta_base)
-        if not ruta.exists():
-            return []
+        archivos_extraidos = {}
         
-        archivos = []
-        for extension in tipos_archivo:
-            patron = f"*{extension}"
-            archivos.extend(ruta.rglob(patron))
+        with zipfile.ZipFile(archivo_zip, 'r') as zip_ref:
+            # Obtener lista de archivos
+            lista_archivos = zip_ref.namelist()
+            
+            for archivo_nombre in lista_archivos:
+                # Ignorar carpetas
+                if not archivo_nombre.endswith('/'):
+                    # Leer archivo en memoria
+                    with zip_ref.open(archivo_nombre) as archivo:
+                        contenido = archivo.read()
+                        
+                        # Crear objeto file-like en memoria
+                        archivo_memoria = io.BytesIO(contenido)
+                        archivo_memoria.name = Path(archivo_nombre).name
+                        
+                        archivos_extraidos[archivo_nombre] = archivo_memoria
         
-        # Limitar al máximo especificado
-        return archivos[:max_documentos]
+        return archivos_extraidos, None
+        
+    except Exception as e:
+        return None, f"Error extrayendo ZIP: {str(e)}"
+
+def buscar_archivos_en_zip(archivos_zip, tipos_archivo, max_documentos):
+    """
+    Busca archivos en el ZIP extraído según los tipos especificados
+    """
+    try:
+        archivos_encontrados = []
+        
+        for nombre_archivo, archivo_memoria in archivos_zip.items():
+            extension = Path(nombre_archivo).suffix.lower()
+            if extension in tipos_archivo:
+                archivos_encontrados.append((nombre_archivo, archivo_memoria))
+            
+            if len(archivos_encontrados) >= max_documentos:
+                break
+        
+        return archivos_encontrados
     
     except Exception as e:
-        st.error(f"❌ Error buscando archivos: {str(e)}")
+        st.error(f"❌ Error buscando archivos en ZIP: {str(e)}")
         return []
 
-def procesar_archivo_local(archivo_path, ci, metadatos_ci, config):
+def procesar_archivo_local_zip(archivo_nombre, archivo_memoria, ci, metadatos_ci, config):
     """
-    Procesa un archivo local para la carga masiva
+    Procesa un archivo desde ZIP para la carga local
     """
     try:
         # Determinar tipo de archivo
-        extension = archivo_path.suffix.lower()
+        extension = Path(archivo_nombre).suffix.lower()
         if extension == '.pdf':
             tipo_archivo = 'pdf'
         elif extension in ['.docx', '.doc']:
@@ -258,7 +288,7 @@ def procesar_archivo_local(archivo_path, ci, metadatos_ci, config):
         # Generar título automático si no está en metadatos
         titulo = metadatos_ci.get('titulo')
         if not titulo:
-            nombre_archivo = archivo_path.stem
+            nombre_archivo = Path(archivo_nombre).stem
             titulo = f"{nombre_archivo} - {metadatos_ci['nombre']}"
         
         # Procesar etiquetas
@@ -270,8 +300,8 @@ def procesar_archivo_local(archivo_path, ci, metadatos_ci, config):
         etiquetas.extend([str(ci), 'carga_local', 'sistema_archivos', tipo_archivo])
         
         # Obtener información del archivo
-        tamaño_bytes = archivo_path.stat().st_size
-        fecha_modificacion = datetime.fromtimestamp(archivo_path.stat().st_mtime)
+        tamaño_bytes = len(archivo_memoria.getvalue())
+        fecha_modificacion = datetime.utcnow()
         
         # Crear documento (sin contenido binario, solo metadatos)
         documento = {
@@ -284,8 +314,8 @@ def procesar_archivo_local(archivo_path, ci, metadatos_ci, config):
             "tags": etiquetas,
             "prioridad": metadatos_ci.get('prioridad', 'Media'),
             "tipo": tipo_archivo,
-            "nombre_archivo": archivo_path.name,
-            "ruta_local": str(archivo_path),
+            "nombre_archivo": Path(archivo_nombre).name,
+            "ruta_local": f"zip://{archivo_nombre}",
             "tamaño_bytes": tamaño_bytes,
             "fecha_modificacion_local": fecha_modificacion,
             "fecha_creacion": datetime.utcnow(),
@@ -294,23 +324,23 @@ def procesar_archivo_local(archivo_path, ci, metadatos_ci, config):
             "usuario_actualizacion": st.session_state.mongo_username,
             "procesado_local": True,
             "lote_carga": config.get('lote_id'),
-            "almacenamiento": "local"  # Indica que el archivo está en sistema local
+            "almacenamiento": "zip"  # Indica que el archivo viene de ZIP
         }
         
         return documento, None
         
     except Exception as e:
-        return None, f"Error procesando {archivo_path}: {str(e)}"
+        return None, f"Error procesando {archivo_nombre}: {str(e)}"
 
-def procesar_carga_local(db, ruta_base, df_metadatos, tipos_archivo, max_documentos, 
-                        tamaño_lote, patron_busqueda, sobrescribir_existentes):
+def procesar_carga_local_zip(db, archivos_zip, df_metadatos, tipos_archivo, max_documentos, 
+                            tamaño_lote, patron_busqueda, sobrescribir_existentes):
     """
-    Función principal para procesar carga masiva local
+    Función principal para procesar carga masiva local desde ZIP
     """
     try:
         # Configuración
         config = {
-            'lote_id': f"local_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            'lote_id': f"local_zip_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         }
         
         # Contadores
@@ -322,15 +352,15 @@ def procesar_carga_local(db, ruta_base, df_metadatos, tipos_archivo, max_documen
         documentos_sin_ci = 0
         cis_encontrados = set()
         
-        # Buscar archivos
-        st.info("🔍 Buscando archivos en la carpeta local...")
-        archivos_encontrados = buscar_archivos_locales(ruta_base, tipos_archivo, max_documentos)
+        # Buscar archivos en el ZIP
+        st.info("🔍 Buscando archivos en el ZIP...")
+        archivos_encontrados = buscar_archivos_en_zip(archivos_zip, tipos_archivo, max_documentos)
         
         if not archivos_encontrados:
-            st.warning("⚠️ No se encontraron archivos para procesar")
+            st.warning("⚠️ No se encontraron archivos para procesar en el ZIP")
             return
         
-        st.success(f"🎯 Encontrados {len(archivos_encontrados)} archivos")
+        st.success(f"🎯 Encontrados {len(archivos_encontrados)} archivos en el ZIP")
         
         # Crear mapeo CI -> metadatos para búsqueda rápida
         mapeo_metadatos = {}
@@ -348,9 +378,9 @@ def procesar_carga_local(db, ruta_base, df_metadatos, tipos_archivo, max_documen
             lote_actual = archivos_encontrados[i:i + tamaño_lote]
             documentos_a_insertar = []
             
-            for archivo_path in lote_actual:
+            for archivo_nombre, archivo_memoria in lote_actual:
                 # Extraer CI del nombre del archivo
-                ci_extraido = extraer_ci_desde_nombre(archivo_path.name, patron_busqueda)
+                ci_extraido = extraer_ci_desde_nombre(archivo_nombre, patron_busqueda)
                 
                 if not ci_extraido:
                     documentos_sin_ci += 1
@@ -367,9 +397,9 @@ def procesar_carga_local(db, ruta_base, df_metadatos, tipos_archivo, max_documen
                 # Verificar duplicados si no se permite sobrescribir
                 if not sobrescribir_existentes:
                     existe = db.documentos.count_documents({
-                        "nombre_archivo": archivo_path.name,
+                        "nombre_archivo": Path(archivo_nombre).name,
                         "ci": ci_extraido,
-                        "almacenamiento": "local"
+                        "almacenamiento": "zip"
                     }) > 0
                     
                     if existe:
@@ -377,7 +407,7 @@ def procesar_carga_local(db, ruta_base, df_metadatos, tipos_archivo, max_documen
                         continue
                 
                 # Procesar archivo
-                documento, error = procesar_archivo_local(archivo_path, ci_extraido, metadatos_ci, config)
+                documento, error = procesar_archivo_local_zip(archivo_nombre, archivo_memoria, ci_extraido, metadatos_ci, config)
                 
                 if error:
                     documentos_fallidos += 1
@@ -415,12 +445,12 @@ def procesar_carga_local(db, ruta_base, df_metadatos, tipos_archivo, max_documen
         status_text.text("✅ Procesamiento completado!")
         
         with resultados_container:
-            st.markdown("### 📈 Resultados Finales - Carga Local")
+            st.markdown("### 📈 Resultados Finales - Carga Local desde ZIP")
             
             # Métricas principales
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Archivos Encontrados", len(archivos_encontrados))
+                st.metric("Archivos en ZIP", len(archivos_encontrados))
             with col2:
                 st.metric("Procesados Exitosos", documentos_exitosos)
             with col3:
@@ -429,7 +459,7 @@ def procesar_carga_local(db, ruta_base, df_metadatos, tipos_archivo, max_documen
                 st.metric("CIs Encontrados", len(cis_encontrados))
             
             if documentos_exitosos > 0:
-                st.success(f"🎉 Carga local completada por {st.session_state.mongo_username}! {documentos_exitosos} documentos procesados exitosamente.")
+                st.success(f"🎉 Carga local desde ZIP completada por {st.session_state.mongo_username}! {documentos_exitosos} documentos procesados exitosamente.")
                 st.balloons()
                 
                 # Mostrar detalles adicionales
@@ -454,72 +484,36 @@ def procesar_carga_local(db, ruta_base, df_metadatos, tipos_archivo, max_documen
                           "Verifica que los nombres de archivo contengan el CI y que el CSV tenga los metadatos correspondientes.")
                 
     except Exception as e:
-        st.error(f"❌ Error en el procesamiento local: {str(e)}")
+        st.error(f"❌ Error en el procesamiento local desde ZIP: {str(e)}")
 
-# --- FUNCIONES PARA CARGA MASIVA ---
+# --- FUNCIONES PARA CARGA MASIVA CON ZIP ---
 
-def validar_csv_metadatos(df):
-    """Valida la estructura del CSV de metadatos"""
-    errores = []
-    
-    # Verificar que el DataFrame no esté vacío
-    if df.empty:
-        errores.append("El archivo CSV está vacío")
-        return errores
-    
-    # Verificar que tenga columnas
-    if len(df.columns) == 0:
-        errores.append("El archivo CSV no tiene columnas")
-        return errores
-    
-    # Campos obligatorios
-    campos_obligatorios = ['ci', 'nombre']
-    for campo in campos_obligatorios:
-        if campo not in df.columns:
-            errores.append(f"Falta columna obligatoria: '{campo}'")
-    
-    if errores:
-        return errores
-    
-    # Validar que CI sean únicos y válidos
-    if df['ci'].isnull().any():
-        errores.append("Hay valores nulos en la columna 'ci'")
-    
-    return errores
-
-def buscar_archivos_por_ci(ruta_base, ci, tipos_archivo, procesar_subcarpetas):
-    """Busca archivos para un CI específico"""
+def buscar_archivos_por_ci_zip(archivos_zip, ci, tipos_archivo):
+    """Busca archivos para un CI específico en el ZIP"""
     try:
         ci_str = str(ci).strip()
-        carpeta_ci = Path(ruta_base) / ci_str
+        archivos_ci = []
         
-        if not carpeta_ci.exists():
-            return []
+        for archivo_nombre, archivo_memoria in archivos_zip.items():
+            # Buscar archivos que contengan el CI en el nombre o path
+            if ci_str in archivo_nombre:
+                extension = Path(archivo_nombre).suffix.lower()
+                if extension in tipos_archivo:
+                    archivos_ci.append((archivo_nombre, archivo_memoria))
         
-        archivos = []
-        
-        # Buscar en carpeta principal
-        for extension in tipos_archivo:
-            patron = f"*{extension}"
-            if procesar_subcarpetas:
-                archivos.extend(carpeta_ci.rglob(patron))
-            else:
-                archivos.extend(carpeta_ci.glob(patron))
-        
-        return archivos
+        return archivos_ci
     
     except Exception as e:
         return []
 
-def procesar_archivo_masivo(archivo_path, ci, metadatos_ci, config):
-    """Procesa un archivo individual para la carga masiva"""
+def procesar_archivo_masivo_zip(archivo_nombre, archivo_memoria, ci, metadatos_ci, config):
+    """Procesa un archivo individual desde ZIP para la carga masiva"""
     try:
-        # Leer contenido binario
-        with open(archivo_path, 'rb') as f:
-            contenido_binario = Binary(f.read())
+        # Leer contenido binario desde el archivo en memoria
+        contenido_binario = Binary(archivo_memoria.getvalue())
         
         # Determinar tipo de archivo
-        extension = archivo_path.suffix.lower()
+        extension = Path(archivo_nombre).suffix.lower()
         if extension == '.pdf':
             tipo_archivo = 'pdf'
         elif extension in ['.docx', '.doc']:
@@ -534,7 +528,7 @@ def procesar_archivo_masivo(archivo_path, ci, metadatos_ci, config):
         # Generar título automático si no está en metadatos
         titulo = metadatos_ci.get('titulo')
         if not titulo:
-            nombre_archivo = archivo_path.stem
+            nombre_archivo = Path(archivo_nombre).stem
             titulo = f"{nombre_archivo} - {metadatos_ci['nombre']}"
         
         # Procesar etiquetas
@@ -543,7 +537,7 @@ def procesar_archivo_masivo(archivo_path, ci, metadatos_ci, config):
             etiquetas = [tag.strip() for tag in str(metadatos_ci['etiquetas']).split(',')]
         
         # Agregar etiquetas automáticas
-        etiquetas.extend([str(ci), 'carga_masiva', 'automático', tipo_archivo])
+        etiquetas.extend([str(ci), 'carga_masiva', 'automático', tipo_archivo, 'zip'])
         
         # Crear documento
         documento = {
@@ -556,10 +550,10 @@ def procesar_archivo_masivo(archivo_path, ci, metadatos_ci, config):
             "tags": etiquetas,
             "prioridad": metadatos_ci.get('prioridad', 'Media'),
             "tipo": tipo_archivo,
-            "nombre_archivo": archivo_path.name,
+            "nombre_archivo": Path(archivo_nombre).name,
             "contenido_binario": contenido_binario,
             "tamaño_bytes": len(contenido_binario),
-            "ruta_original": str(archivo_path),
+            "ruta_original": f"zip://{archivo_nombre}",
             "fecha_creacion": datetime.utcnow(),
             "fecha_actualizacion": datetime.utcnow(),
             "usuario_creacion": st.session_state.mongo_username,
@@ -572,16 +566,16 @@ def procesar_archivo_masivo(archivo_path, ci, metadatos_ci, config):
         return documento, None
         
     except Exception as e:
-        return None, f"Error procesando {archivo_path}: {str(e)}"
+        return None, f"Error procesando {archivo_nombre}: {str(e)}"
 
-def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_documentos, 
-                           tamaño_lote, procesar_subcarpetas, sobrescribir_existentes):
-    """Función principal para procesar carga masiva por CI"""
+def procesar_carga_masiva_ci_zip(db, archivos_zip, df_metadatos, tipos_archivo, max_documentos, 
+                               tamaño_lote, sobrescribir_existentes):
+    """Función principal para procesar carga masiva por CI desde ZIP"""
     
     try:
         # Configuración
         config = {
-            'lote_id': f"masivo_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            'lote_id': f"masivo_zip_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         }
         
         # Contadores
@@ -595,18 +589,18 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
         # Lista para almacenar todos los documentos a procesar
         todos_documentos = []
         
-        st.info("🔍 Buscando archivos en carpetas CI...")
+        st.info("🔍 Buscando archivos en ZIP por CI...")
         
         # Buscar archivos para cada CI en el CSV
         for _, fila in df_metadatos.iterrows():
             ci = fila['ci']
-            archivos_ci = buscar_archivos_por_ci(ruta_base, ci, tipos_archivo, procesar_subcarpetas)
+            archivos_ci = buscar_archivos_por_ci_zip(archivos_zip, ci, tipos_archivo)
             
             if archivos_ci:
                 cis_procesados += 1
-                for archivo in archivos_ci:
+                for archivo_nombre, archivo_memoria in archivos_ci:
                     if total_archivos < max_documentos:
-                        todos_documentos.append((archivo, ci, fila.to_dict()))
+                        todos_documentos.append((archivo_nombre, archivo_memoria, ci, fila.to_dict()))
                         total_archivos += 1
                     else:
                         break
@@ -615,10 +609,10 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
                 break
         
         if not todos_documentos:
-            st.warning("⚠️ No se encontraron archivos para procesar")
+            st.warning("⚠️ No se encontraron archivos para procesar en el ZIP")
             return
         
-        st.success(f"🎯 Encontrados {total_archivos} archivos en {cis_procesados} carpetas CI")
+        st.success(f"🎯 Encontrados {total_archivos} archivos para {cis_procesados} CIs diferentes en el ZIP")
         
         # Configurar interfaz de progreso
         progress_bar = st.progress(0)
@@ -630,11 +624,11 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
             lote_actual = todos_documentos[i:i + tamaño_lote]
             documentos_a_insertar = []
             
-            for archivo_path, ci, metadatos in lote_actual:
+            for archivo_nombre, archivo_memoria, ci, metadatos in lote_actual:
                 # Verificar duplicados si no se permite sobrescribir
                 if not sobrescribir_existentes:
                     existe = db.documentos.count_documents({
-                        "nombre_archivo": archivo_path.name,
+                        "nombre_archivo": Path(archivo_nombre).name,
                         "ci": str(ci)
                     }) > 0
                     
@@ -643,7 +637,7 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
                         continue
                 
                 # Procesar archivo
-                documento, error = procesar_archivo_masivo(archivo_path, ci, metadatos, config)
+                documento, error = procesar_archivo_masivo_zip(archivo_nombre, archivo_memoria, ci, metadatos, config)
                 
                 if error:
                     documentos_fallidos += 1
@@ -680,7 +674,7 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
         status_text.text("✅ Procesamiento completado!")
         
         with resultados_container:
-            st.markdown("### 📈 Resultados Finales")
+            st.markdown("### 📈 Resultados Finales - Carga Masiva desde ZIP")
             
             # Métricas principales
             col1, col2, col3, col4 = st.columns(4)
@@ -694,7 +688,7 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
                 st.metric("CIs Procesados", cis_procesados)
             
             if documentos_exitosos > 0:
-                st.success(f"🎉 Carga masiva completada por {st.session_state.mongo_username}! {documentos_exitosos} documentos procesados exitosamente.")
+                st.success(f"🎉 Carga masiva desde ZIP completada por {st.session_state.mongo_username}! {documentos_exitosos} documentos procesados exitosamente.")
                 st.balloons()
                 
                 # Actualizar estadísticas
@@ -705,9 +699,12 @@ def procesar_carga_masiva_ci(db, ruta_base, df_metadatos, tipos_archivo, max_doc
                        "Marca 'Sobrescribir documentos existentes' para forzar el reprocesamiento.")
                 
     except Exception as e:
-        st.error(f"❌ Error en el procesamiento masivo: {str(e)}")
+        st.error(f"❌ Error en el procesamiento masivo desde ZIP: {str(e)}")
 
-# --- FUNCIONES PARA CARGA INDIVIDUAL ---
+# ... (MANTENER TODAS LAS FUNCIONES ORIGINALES EXCEPTO LAS DE CARGA LOCAL Y MASIVA)
+
+# Las funciones originales de procesamiento de archivos, búsqueda, etc. se mantienen igual
+# Solo reemplazamos las funciones de carga local y masiva
 
 def procesar_archivo(archivo, tipo_archivo):
     try:
@@ -746,7 +743,6 @@ def buscar_documentos(db, criterio_busqueda, tipo_busqueda, filtros_adicionales=
     try:
         query = {}
         
-        # Mapeo de tipos de búsqueda
         busqueda_map = {
             "nombre": "titulo",
             "autor": "autor",
@@ -765,7 +761,6 @@ def buscar_documentos(db, criterio_busqueda, tipo_busqueda, filtros_adicionales=
             else:
                 query[campo] = {"$regex": criterio_busqueda, "$options": "i"}
         
-        # Aplicar filtros adicionales
         if filtros_adicionales:
             query.update(filtros_adicionales)
         
@@ -788,17 +783,14 @@ def mostrar_documento_compacto(doc, key_suffix=""):
     icono = iconos.get(doc.get('tipo'), '📎')
     doc_id = str(doc['_id'])
     
-    # Crear tarjeta compacta
     with st.container():
         st.markdown(f'<div class="document-card">', unsafe_allow_html=True)
         
         col1, col2 = st.columns([5, 1])
         
         with col1:
-            # Header compacto
             st.markdown(f"**{icono} {doc['titulo']}**")
             
-            # Metadatos en línea compacta
             meta_col1, meta_col2, meta_col3 = st.columns(3)
             with meta_col1:
                 st.markdown(f'<div class="compact-metadata">👤 **Autor:** {doc["autor"]}</div>', unsafe_allow_html=True)
@@ -810,8 +802,9 @@ def mostrar_documento_compacto(doc, key_suffix=""):
                 st.markdown(f'<div class="compact-metadata">📅 **Creado:** {doc["fecha_creacion"].strftime("%d/%m/%Y")}</div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="compact-metadata">👥 **Por:** {doc.get("usuario_creacion", "N/A")}</div>', unsafe_allow_html=True)
             
-            # Información de almacenamiento
-            if doc.get('almacenamiento') == 'local':
+            if doc.get('almacenamiento') == 'zip':
+                st.markdown(f'<div class="compact-metadata">💾 **Almacenamiento:** Archivo ZIP</div>', unsafe_allow_html=True)
+            elif doc.get('almacenamiento') == 'local':
                 st.markdown(f'<div class="compact-metadata">💾 **Almacenamiento:** Local ({doc.get("ruta_local", "N/A")})</div>', unsafe_allow_html=True)
             else:
                 st.markdown(f'<div class="compact-metadata">💾 **Almacenamiento:** Base de datos</div>', unsafe_allow_html=True)
@@ -819,12 +812,10 @@ def mostrar_documento_compacto(doc, key_suffix=""):
             if doc.get('fecha_actualizacion') and doc.get('usuario_actualizacion'):
                 st.markdown(f'<div class="compact-metadata">✏️ **Actualizado:** {doc["fecha_actualizacion"].strftime("%d/%m/%Y")} por {doc["usuario_actualizacion"]}</div>', unsafe_allow_html=True)
             
-            # Tags compactos
             if doc.get('tags'):
                 tags_html = " ".join([f'<span class="tag">{tag}</span>' for tag in doc['tags']])
                 st.markdown(f'<div class="compact-metadata">🏷️ **Tags:** {tags_html}</div>', unsafe_allow_html=True)
             
-            # Información específica del tipo
             if doc.get('tipo') == 'texto':
                 contenido_preview = doc['contenido'][:100] + "..." if len(doc['contenido']) > 100 else doc['contenido']
                 st.markdown(f'<div class="compact-metadata">📝 **Contenido:** {contenido_preview}</div>', unsafe_allow_html=True)
@@ -834,43 +825,34 @@ def mostrar_documento_compacto(doc, key_suffix=""):
                     tamaño_mb = doc['tamaño_bytes'] / (1024 * 1024)
                     st.markdown(f'<div class="compact-metadata">💾 **Tamaño:** {tamaño_mb:.2f} MB</div>', unsafe_allow_html=True)
                 
-                # Botón de descarga solo para archivos en base de datos
-                if doc.get('contenido_binario') and doc.get('almacenamiento') != 'local':
+                if doc.get('contenido_binario') and doc.get('almacenamiento') != 'zip':
                     boton_descarga = crear_boton_descarga(
                         doc['contenido_binario'],
                         doc['nombre_archivo'],
                         doc['tipo']
                     )
                     st.markdown(boton_descarga, unsafe_allow_html=True)
-                elif doc.get('almacenamiento') == 'local':
-                    st.markdown(f'<div class="compact-metadata">📍 **Archivo local:** No disponible para descarga directa</div>', unsafe_allow_html=True)
+                elif doc.get('almacenamiento') == 'zip':
+                    st.markdown(f'<div class="compact-metadata">📍 **Archivo en ZIP:** No disponible para descarga directa</div>', unsafe_allow_html=True)
             
-            # ID único (pequeño y discreto)
             st.markdown(f'<div class="compact-metadata" style="font-size: 0.7rem; color: #999;">🆔 **ID:** {doc_id[:12]}...</div>', unsafe_allow_html=True)
         
         with col2:
-            # Botón de eliminar compacto
-            st.write("")  # Espacio
+            st.write("")
             if st.button("🗑️", key=f"delete_{doc_id}_{key_suffix}", help="Eliminar documento", use_container_width=True):
                 with st.spinner("Eliminando..."):
                     try:
-                        # Verificar que el documento existe antes de eliminar
                         doc_existente = st.session_state.db_connection.documentos.find_one({"_id": doc["_id"]})
                         if not doc_existente:
                             st.error("❌ El documento ya no existe")
                             return
                         
-                        # Eliminar el documento
                         result = st.session_state.db_connection.documentos.delete_one({"_id": doc["_id"]})
                         
                         if result.deleted_count > 0:
                             st.success("✅ Documento eliminado")
-                            
-                            # ACTUALIZAR SESSION_STATE PARA INVALIDAR CACHE
                             st.session_state.last_delete_time = datetime.now().timestamp()
                             st.session_state.refresh_counter += 1
-                            
-                            # Esperar y recargar
                             time.sleep(1.5)
                             st.rerun()
                         else:
@@ -887,7 +869,6 @@ def crear_formulario_documento(tipo_documento, tab_key):
     with st.form(f"form_{tipo_documento}_{tab_key}", clear_on_submit=True):
         st.markdown(f"### 📝 Información del Documento")
         
-        # Mostrar usuario actual que realizará la acción
         st.info(f"**Usuario de BD:** 👤 {st.session_state.mongo_username}")
         
         col1, col2 = st.columns(2)
@@ -940,7 +921,6 @@ def crear_formulario_documento(tipo_documento, tab_key):
                 key=f"prioridad_{tipo_documento}_{tab_key}"
             )
         
-        # Campos específicos por tipo
         if tipo_documento == "texto":
             contenido = st.text_area(
                 "**Contenido del documento** *",
@@ -978,7 +958,6 @@ def crear_formulario_documento(tipo_documento, tab_key):
 def validar_y_guardar_documento(tipo_documento, variables_locales):
     """Valida y guarda el documento en la base de datos"""
     
-    # Extraer variables del contexto local
     titulo = variables_locales['titulo']
     autor = variables_locales['autor']
     ci = variables_locales['ci']
@@ -996,7 +975,6 @@ def validar_y_guardar_documento(tipo_documento, variables_locales):
             st.warning("⚠️ Debes seleccionar un archivo")
             return False
     
-    # Preparar documento
     documento = {
         "titulo": titulo,
         "categoria": variables_locales['categoria'],
@@ -1010,7 +988,7 @@ def validar_y_guardar_documento(tipo_documento, variables_locales):
         "fecha_actualizacion": datetime.utcnow(),
         "usuario_creacion": st.session_state.mongo_username,
         "usuario_actualizacion": st.session_state.mongo_username,
-        "almacenamiento": "base_datos"  # Para documentos subidos directamente
+        "almacenamiento": "base_datos"
     }
     
     if tipo_documento == "texto":
@@ -1035,56 +1013,67 @@ def validar_y_guardar_documento(tipo_documento, variables_locales):
         st.success(f"✅ Documento '{titulo}' guardado exitosamente por {st.session_state.mongo_username}!")
         st.balloons()
         
-        # Actualizar timestamp para refrescar estadísticas
         st.session_state.last_delete_time = datetime.now().timestamp()
         return True
     except Exception as e:
         st.error(f"❌ Error al guardar: {str(e)}")
         return False
 
-# --- FUNCIONES PARA CSV ---
+def validar_csv_metadatos(df):
+    """Valida la estructura del CSV de metadatos"""
+    errores = []
+    
+    if df.empty:
+        errores.append("El archivo CSV está vacío")
+        return errores
+    
+    if len(df.columns) == 0:
+        errores.append("El archivo CSV no tiene columnas")
+        return errores
+    
+    campos_obligatorios = ['ci', 'nombre']
+    for campo in campos_obligatorios:
+        if campo not in df.columns:
+            errores.append(f"Falta columna obligatoria: '{campo}'")
+    
+    if errores:
+        return errores
+    
+    if df['ci'].isnull().any():
+        errores.append("Hay valores nulos en la columna 'ci'")
+    
+    return errores
 
 def cargar_y_validar_csv(archivo_csv, nombre_funcionalidad="carga"):
     """Carga y valida un archivo CSV con manejo de errores mejorado"""
     try:
-        # Verificar que el archivo no esté vacío
         if archivo_csv.size == 0:
             return None, "El archivo CSV está vacío"
         
-        # Leer el contenido completo primero
         contenido = archivo_csv.getvalue().decode('utf-8')
         
-        # Verificar que el contenido no esté vacío
         if not contenido.strip():
             return None, "El archivo CSV está vacío"
         
-        # Dividir en líneas
         lineas = contenido.strip().split('\n')
         
-        # Verificar que hay al menos una línea (header)
         if len(lineas) == 0:
             return None, "El archivo CSV no contiene datos"
         
-        # Verificar que hay al menos una fila de datos (además del header)
         if len(lineas) < 2:
             return None, "El archivo CSV no contiene filas de datos"
         
-        # Intentar leer con pandas
         try:
-            # Resetear el archivo para pandas
             archivo_csv.seek(0)
             df = pd.read_csv(archivo_csv)
         except Exception as e:
-            # Si falla pandas, intentar procesamiento manual
             try:
-                # Procesar manualmente
                 headers = lineas[0].split(',')
                 data = []
                 
                 for line in lineas[1:]:
-                    if line.strip():  # Saltar líneas vacías
+                    if line.strip():
                         values = line.split(',')
-                        # Asegurar que tenga el mismo número de columnas que el header
                         if len(values) == len(headers):
                             data.append(values)
                 
@@ -1097,21 +1086,16 @@ def cargar_y_validar_csv(archivo_csv, nombre_funcionalidad="carga"):
             except Exception as e2:
                 return None, f"No se pudo leer el CSV: {str(e2)}"
         
-        # Validar que el DataFrame no esté vacío
         if df.empty:
             return None, "El archivo CSV no contiene filas de datos"
         
-        # Validar que tenga columnas
         if len(df.columns) == 0:
             return None, "El archivo CSV no tiene columnas identificables"
         
-        # Limpiar nombres de columnas
         df.columns = df.columns.str.strip()
         
-        # Mostrar información del CSV cargado
         st.success(f"✅ CSV cargado exitosamente: {len(df)} registros, {len(df.columns)} columnas")
         
-        # Validar estructura específica
         errores = validar_csv_metadatos(df)
         if errores:
             return None, " | ".join(errores)
@@ -1141,12 +1125,10 @@ def crear_plantilla_carga_masiva():
     
     df_plantilla = pd.DataFrame(datos_ejemplo)
     
-    # Crear archivo CSV en memoria
     output = io.BytesIO()
     df_plantilla.to_csv(output, index=False, encoding='utf-8')
     output.seek(0)
     
-    # Botón de descarga CSV
     b64 = base64.b64encode(output.read()).decode()
     href = f'''
     <a href="data:text/csv;base64,{b64}" 
@@ -1159,61 +1141,13 @@ def crear_plantilla_carga_masiva():
     '''
     st.markdown(href, unsafe_allow_html=True)
 
-# --- FUNCIONES PARA RUTAS ---
-
-def obtener_rutas_sugeridas():
-    """Devuelve rutas sugeridas basadas en el sistema operativo"""
-    sistema = platform.system()
-    
-    rutas_sugeridas = []
-    
-    if sistema == "Windows":
-        rutas_sugeridas = [
-            "./documentos",
-            "./archivos",
-            "C:/archivos", 
-            "C:/temp",
-            "C:/Users/Public/Documents"
-        ]
-    elif sistema == "Linux":
-        rutas_sugeridas = [
-            "./documentos",
-            "./data", 
-            "./archivos",
-            "/tmp",
-            "/home/usuario/Documentos"
-        ]
-    else:  # macOS
-        rutas_sugeridas = [
-            "./documentos",
-            "./data",
-            "./archivos",
-            "/tmp",
-            "/Users/tuusuario/Documents"
-        ]
-    
-    return rutas_sugeridas
-
-def verificar_o_crear_carpeta(ruta):
-    """Verifica si la carpeta existe, si no, la crea"""
-    try:
-        ruta_path = Path(ruta)
-        if not ruta_path.exists():
-            ruta_path.mkdir(parents=True, exist_ok=True)
-            return True, f"✅ Carpeta creada: {ruta}"
-        return True, f"✅ Carpeta existe: {ruta}"
-    except Exception as e:
-        return False, f"❌ Error con la carpeta: {str(e)}"
-
 # --- SIDEBAR MEJORADO ---
 
 with st.sidebar:
     st.markdown("## 🔐 Configuración")
     
-    # Logo o imagen de la empresa
     st.image("https://cdn-icons-png.flaticon.com/512/2721/2721264.png", width=80)
     
-    # Mostrar información del usuario actual
     st.markdown("### 👤 Usuario de Base de Datos")
     st.markdown(f'<div class="user-badge">👤 {st.session_state.mongo_username}</div>', unsafe_allow_html=True)
     st.write(f"**Estado:** {st.session_state.current_user}")
@@ -1226,7 +1160,6 @@ with st.sidebar:
         key="mongo_uri_input"
     )
     
-    # Botón para conectar/desconectar
     col_conn1, col_conn2 = st.columns(2)
     with col_conn1:
         connect_btn = st.button("🔗 Conectar", use_container_width=True, key="connect_btn")
@@ -1241,7 +1174,7 @@ with st.sidebar:
         st.session_state.df_metadatos_local = None
         st.session_state.df_metadatos_masiva = None
         st.session_state.last_delete_time = datetime.now().timestamp()
-        st.session_state.ruta_seleccionada = ""
+        st.session_state.archivos_zip_procesados = {}
         st.success("🔓 Desconectado de la base de datos")
         st.rerun()
     
@@ -1258,7 +1191,6 @@ with st.sidebar:
             else:
                 st.error(f"❌ {message}")
     
-    # Mostrar estadísticas si hay conexión
     if st.session_state.db_connected:
         st.success(f"✅ Conexión activa | 👤 {st.session_state.mongo_username}")
         st.markdown("---")
@@ -1271,15 +1203,13 @@ with st.sidebar:
             word_count = db.documentos.count_documents({"tipo": "word"})
             text_count = db.documentos.count_documents({"tipo": "texto"})
             image_count = db.documentos.count_documents({"tipo": "imagen"})
-            local_count = db.documentos.count_documents({"almacenamiento": "local"})
+            zip_count = db.documentos.count_documents({"almacenamiento": "zip"})
             usuarios_activos = db.documentos.distinct("usuario_creacion")
             
             st.markdown("### 📊 Estadísticas")
             
-            # Métricas principales
             st.metric("📄 Total Documentos", total_docs)
             
-            # Estadísticas por tipo
             col1, col2 = st.columns(2)
             with col1:
                 st.metric("📝 Texto", text_count)
@@ -1288,9 +1218,8 @@ with st.sidebar:
                 st.metric("📋 Word", word_count)
                 st.metric("🖼️ Imágenes", image_count)
             
-            # Estadísticas adicionales
             st.metric("👥 Usuarios Activos", len(usuarios_activos))
-            st.metric("💾 Archivos Locales", local_count)
+            st.metric("📦 Archivos ZIP", zip_count)
                 
         except Exception as e:
             st.error(f"❌ Error obteniendo estadísticas: {str(e)}")
@@ -1308,19 +1237,17 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
     db = st.session_state.db_connection
     st.success(f"🚀 Conectado a la base de datos | 👤 Usuario: {st.session_state.mongo_username}")
     
-    # --- PESTAÑAS REORGANIZADAS ---
     st.markdown("---")
     st.markdown("## 📁 Gestión de Documentos")
     
-    # ORGANIZACIÓN DE PESTAÑAS
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "🔍 Buscar Documentos", 
         "📝 Crear Texto", 
         "📄 Subir PDF", 
         "📝 Subir Word", 
         "📂 Todos los Documentos",
-        "🚀 Carga Masiva",
-        "💾 Carga Local"
+        "🚀 Carga Masiva ZIP",
+        "💾 Carga Local ZIP"
     ])
     
     # PESTAÑA 1: BÚSQUEDA AVANZADA
@@ -1359,7 +1286,6 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                 st.write("")
                 buscar_btn = st.button("🔎 Ejecutar Búsqueda", use_container_width=True, key="buscar_btn_tab1")
         
-        # Filtros adicionales compactos
         col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1:
             filtro_tipo_busq = st.selectbox("Filtrar por tipo", ["Todos", "Texto", "PDF", "Word", "Imagen"], key="filtro_tipo_tab1")
@@ -1368,10 +1294,8 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         with col_f3:
             filtro_prioridad_busq = st.selectbox("Filtrar por prioridad", ["Todas", "Alta", "Media", "Baja"], key="filtro_prioridad_tab1")
         
-        # Realizar búsqueda
         if buscar_btn and criterio_busqueda:
             with st.spinner("🔍 Buscando en la base de datos..."):
-                # Preparar filtros adicionales
                 filtros_adicionales = {}
                 if filtro_tipo_busq != "Todos":
                     filtros_adicionales["tipo"] = filtro_tipo_busq.lower()
@@ -1389,7 +1313,6 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                 elif documentos_encontrados:
                     st.success(f"✅ Encontrados {len(documentos_encontrados)} documento(s)")
                     
-                    # Mostrar resultados en formato compacto
                     for i, doc in enumerate(documentos_encontrados):
                         mostrar_documento_compacto(doc, f"search_{i}")
                 else:
@@ -1417,7 +1340,6 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
     with tab5:
         st.markdown("### 📂 Biblioteca de Documentos")
         
-        # Filtros avanzados compactos
         with st.expander("**🎛️ Filtros Avanzados**", expanded=False):
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -1429,10 +1351,8 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
             with col4:
                 fecha_desde = st.date_input("Desde fecha", key="fecha_desde_tab5")
         
-        # Búsqueda rápida
         busqueda_rapida = st.text_input("🔍 Búsqueda rápida por título o CI", key="busqueda_rapida_tab5")
         
-        # Construir query
         query = {}
         if filtro_tipo != "Todos":
             query["tipo"] = filtro_tipo.lower()
@@ -1457,7 +1377,6 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
             if documentos:
                 st.info(f"📊 Mostrando {len(documentos)} documento(s)")
                 
-                # Mostrar en formato compacto
                 for i, doc in enumerate(documentos):
                     mostrar_documento_compacto(doc, f"all_{i}")
             else:
@@ -1466,30 +1385,48 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         except Exception as e:
             st.error(f"❌ Error al cargar documentos: {str(e)}")
     
-    # PESTAÑA 6: Carga Masiva por CI
+    # PESTAÑA 6: Carga Masiva por CI CON ZIP
     with tab6:
-        st.markdown("### 🚀 Carga Masiva de Archivos")
+        st.markdown("### 🚀 Carga Masiva desde ZIP")
         st.info(f"""
-        **Carga masiva de documentos organizados por carpetas de CI**
-        - Estructura: `C:/ruta/carpetas/CI/archivos.pdf`
+        **Carga masiva de documentos desde archivo ZIP**
+        - Sube un ZIP con documentos organizados
+        - Los documentos se almacenan en la base de datos
         - Soporta: PDF, Word, imágenes, texto
-        - Metadatos automáticos desde CSV
         - Hasta 10,000 documentos por carga
         - **Usuario de BD:** 👤 {st.session_state.mongo_username}
         """)
         
-        # Configuración en dos columnas
+        # Configuración
         col_config1, col_config2 = st.columns(2)
         
         with col_config1:
-            st.markdown("#### 📁 Configuración de Carpetas")
-            ruta_base = st.text_input(
-                "**Ruta base de carpetas CI** *",
-                value="C:\\documentos\\",
-                placeholder="C:\\ruta\\carpetas_ci\\",
-                help="Ruta donde están las carpetas organizadas por número de CI",
-                key="ruta_base_tab6"
+            st.markdown("#### 📦 Subir Archivo ZIP")
+            
+            archivo_zip_masivo = st.file_uploader(
+                "**Selecciona archivo ZIP** *",
+                type=['zip'],
+                help="ZIP con documentos organizados",
+                key="archivo_zip_masivo_tab6"
             )
+            
+            if archivo_zip_masivo:
+                # Extraer y mostrar información del ZIP
+                archivos_zip, error_zip = extraer_archivos_desde_zip(archivo_zip_masivo)
+                
+                if error_zip:
+                    st.error(f"❌ {error_zip}")
+                else:
+                    st.session_state.archivos_zip_procesados['masivo'] = archivos_zip
+                    st.success(f"✅ ZIP procesado: {len(archivos_zip)} archivos extraídos")
+                    
+                    with st.expander("📋 Ver contenido del ZIP", expanded=True):
+                        st.write(f"**Total de archivos:** {len(archivos_zip)}")
+                        for i, (nombre, archivo) in enumerate(list(archivos_zip.items())[:10]):
+                            tamaño_mb = len(archivo.getvalue()) / (1024 * 1024)
+                            st.write(f"{i+1}. 📄 {nombre} ({tamaño_mb:.2f} MB)")
+                        if len(archivos_zip) > 10:
+                            st.write(f"... y {len(archivos_zip) - 10} archivos más")
             
             tipos_archivo = st.multiselect(
                 "**Tipos de archivo a procesar** *",
@@ -1497,13 +1434,6 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                 default=['.pdf', '.docx', '.doc'],
                 help="Selecciona los tipos de archivo a incluir",
                 key="tipos_archivo_tab6"
-            )
-            
-            procesar_subcarpetas = st.checkbox(
-                "**Procesar subcarpetas dentro de cada CI**",
-                value=True,
-                help="Buscar documentos en subcarpetas dentro de cada carpeta de CI",
-                key="procesar_subcarpetas_tab6"
             )
         
         with col_config2:
@@ -1540,7 +1470,7 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         **El CSV debe contener las columnas:**
         - `ci` (obligatorio): Número de cédula
         - `nombre` (obligatorio): Nombre completo
-        - `titulo`: Título del documento (si no se especifica, se genera automáticamente)
+        - `titulo`: Título del documento
         - `categoria`: Categoría del documento
         - `autor`: Autor del documento  
         - `version`: Versión del documento
@@ -1555,25 +1485,20 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
             key="archivo_csv_tab6"
         )
         
-        # Previsualización del CSV
         if archivo_csv:
             try:
-                # Solo cargar y mostrar preview, no procesar todavía
                 content = archivo_csv.getvalue().decode('utf-8')
                 lines = content.split('\n')
                 
                 st.success(f"✅ Archivo CSV cargado: {len(lines)} líneas detectadas")
                 
-                # Mostrar vista previa simple sin consumir el archivo
                 with st.expander("📊 Vista previa del CSV (primeras 5 líneas)", expanded=True):
                     st.write("**Contenido del CSV:**")
-                    for i, line in enumerate(lines[:6]):  # Mostrar header + 5 filas
+                    for i, line in enumerate(lines[:6]):
                         st.text(f"Línea {i+1}: {line}")
                 
-                # Botón para cargar y validar el CSV
                 if st.button("🔍 Validar estructura del CSV", key="validar_csv_tab6"):
                     with st.spinner("Validando CSV..."):
-                        # Resetear el archivo para leerlo desde el inicio
                         archivo_csv.seek(0)
                         df_metadatos, error_csv = cargar_y_validar_csv(archivo_csv, "carga masiva")
                         
@@ -1583,7 +1508,6 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                             st.session_state.df_metadatos_masiva = df_metadatos
                             st.success(f"✅ CSV validado correctamente: {len(df_metadatos)} registros de {df_metadatos['ci'].nunique()} CIs diferentes")
                             
-                            # Mostrar resumen del CSV validado
                             with st.expander("📋 Resumen del CSV validado", expanded=True):
                                 st.dataframe(df_metadatos.head(), use_container_width=True)
                                 st.write(f"**Total de registros:** {len(df_metadatos)}")
@@ -1593,136 +1517,116 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
             except Exception as e:
                 st.error(f"❌ Error al leer el CSV: {str(e)}")
         
-        # Sección para descargar plantilla
         st.markdown("---")
         st.markdown("#### 🧪 Generar Plantilla")
         crear_plantilla_carga_masiva()
         
-        # Botón de procesamiento
-        st.markdown("#### ⚡ Procesamiento Masivo")
+        st.markdown("#### ⚡ Procesamiento Masivo desde ZIP")
         
-        if st.button("🚀 Iniciar Carga Masiva", type="primary", use_container_width=True, key="btn_carga_masiva_tab6"):
-            if st.session_state.df_metadatos_masiva is None:
+        if st.button("🚀 Iniciar Carga Masiva desde ZIP", type="primary", use_container_width=True, key="btn_carga_masiva_tab6"):
+            if 'masivo' not in st.session_state.archivos_zip_procesados:
+                st.error("❌ Primero debes subir y procesar un archivo ZIP")
+            elif st.session_state.df_metadatos_masiva is None:
                 st.error("❌ Primero debes validar el CSV usando el botón 'Validar estructura del CSV'")
-            elif not ruta_base:
-                st.error("❌ Debes especificar la ruta base de las carpetas CI")
             elif not tipos_archivo:
                 st.error("❌ Debes seleccionar al menos un tipo de archivo")
             else:
-                # Usar el DataFrame ya validado del session_state
+                archivos_zip = st.session_state.archivos_zip_procesados['masivo']
                 df_metadatos = st.session_state.df_metadatos_masiva
                 
-                # Mostrar resumen antes de procesar
-                st.info(f"📋 **Resumen a procesar:** {len(df_metadatos)} documentos de {df_metadatos['ci'].nunique()} CIs diferentes")
+                st.info(f"📋 **Resumen a procesar:** {len(archivos_zip)} archivos en ZIP, {len(df_metadatos)} registros de {df_metadatos['ci'].nunique()} CIs")
                 
-                # Procesar carga masiva
-                with st.spinner("🔄 Iniciando procesamiento masivo..."):
-                    resultado = procesar_carga_masiva_ci(
+                with st.spinner("🔄 Iniciando procesamiento masivo desde ZIP..."):
+                    resultado = procesar_carga_masiva_ci_zip(
                         db=db,
-                        ruta_base=ruta_base,
+                        archivos_zip=archivos_zip,
                         df_metadatos=df_metadatos,
                         tipos_archivo=tipos_archivo,
                         max_documentos=max_documentos,
                         tamaño_lote=tamaño_lote,
-                        procesar_subcarpetas=procesar_subcarpetas,
                         sobrescribir_existentes=sobrescribir_existentes
                     )
 
-    # PESTAÑA 7: Carga Masiva con Archivos Locales (VERSIÓN CORREGIDA)
+    # PESTAÑA 7: Carga Local CON ZIP (VERSIÓN STREAMLIT CLOUD)
     with tab7:
-        st.markdown("### 💾 Carga Masiva Local (Archivos en Sistema)")
+        st.markdown("### 💾 Carga Local desde ZIP")
         st.info(f"""
-        **Carga masiva manteniendo archivos en sistema local**
-        - Los archivos permanecen en su ubicación original
+        **Carga masiva manteniendo referencia a archivos en ZIP**
+        - Sube un ZIP con todos los documentos
         - Solo los metadatos se almacenan en MongoDB
+        - Los archivos permanecen referenciados desde el ZIP
         - Soporta: PDF, Word, imágenes, texto
         - Hasta 10,000 documentos por carga
         - **Usuario de BD:** 👤 {st.session_state.mongo_username}
         """)
         
-        # Configuración en dos columnas
+        # Configuración
         col_config1, col_config2 = st.columns(2)
         
         with col_config1:
-            st.markdown("#### 📁 Configuración de Carpetas")
+            st.markdown("#### 📦 Subir Archivo ZIP")
             
-            # INFORMACIÓN SOBRE ENTORNO
-            st.info("💡 **Modo de ingreso manual** - Ingresa la ruta de la carpeta manualmente")
-            
-            ruta_base_local = st.text_input(
-                "**Ruta de carpeta de archivos** *",
-                value=st.session_state.ruta_seleccionada if st.session_state.ruta_seleccionada else "./documentos",
-                placeholder="Ej: ./documentos o C:/Users/TuUsuario/Documents",
-                help="Usa './' para rutas relativas al directorio de la aplicación",
-                key="ruta_base_local_tab7"
+            archivo_zip_local = st.file_uploader(
+                "**Selecciona archivo ZIP con documentos** *",
+                type=['zip'],
+                help="ZIP conteniendo todos los documentos a procesar",
+                key="archivo_zip_local_tab7"
             )
             
-            # BOTONES DE RUTAS SUGERIDAS
-            st.markdown("**Rutas sugeridas:**")
-            col_rutas = st.columns(3)
-            with col_rutas[0]:
-                if st.button("📁 ./documentos", use_container_width=True, key="ruta_docs_tab7"):
-                    st.session_state.ruta_seleccionada = "./documentos"
-                    st.rerun()
-            with col_rutas[1]:
-                if st.button("📁 ./data", use_container_width=True, key="ruta_data_tab7"):
-                    st.session_state.ruta_seleccionada = "./data"
-                    st.rerun()
-            with col_rutas[2]:
-                if st.button("📁 ./archivos", use_container_width=True, key="ruta_archivos_tab7"):
-                    st.session_state.ruta_seleccionada = "./archivos"
-                    st.rerun()
-            
-            # VERIFICACIÓN MEJORADA DE LA CARPETA
-            if ruta_base_local:
-                try:
-                    ruta_path = Path(ruta_base_local)
+            if archivo_zip_local:
+                # Extraer y mostrar información del ZIP
+                archivos_zip, error_zip = extraer_archivos_desde_zip(archivo_zip_local)
+                
+                if error_zip:
+                    st.error(f"❌ {error_zip}")
+                else:
+                    st.session_state.archivos_zip_procesados['local'] = archivos_zip
+                    st.success(f"✅ ZIP procesado: {len(archivos_zip)} archivos extraídos")
                     
-                    if ruta_path.exists():
-                        st.success("✅ ✅ ✅ CARPETA ENCONTRADA - Lista para usar")
+                    # Mostrar estadísticas del ZIP
+                    with st.expander("📊 Estadísticas del ZIP", expanded=True):
+                        st.markdown(f'<div class="zip-info">', unsafe_allow_html=True)
+                        st.write(f"**📦 Archivo ZIP:** {archivo_zip_local.name}")
+                        st.write(f"**📄 Total de archivos:** {len(archivos_zip)}")
                         
-                        # Mostrar contenido de la carpeta
-                        try:
-                            archivos = list(ruta_path.glob("*"))
-                            if archivos:
-                                st.info(f"📁 Contenido: {len(archivos)} archivos/carpetas")
-                                
-                                with st.expander("📋 Ver contenido detallado", expanded=False):
-                                    for archivo in archivos[:8]:  # Mostrar primeros 8
-                                        tipo = "📁" if archivo.is_dir() else "📄"
-                                        if archivo.is_file():
-                                            tamaño_bytes = archivo.stat().st_size
-                                            if tamaño_bytes > 1024*1024:  # MB
-                                                tamaño = f" ({tamaño_bytes/(1024*1024):.1f} MB)"
-                                            else:  # KB
-                                                tamaño = f" ({tamaño_bytes/1024:.1f} KB)"
-                                        else:
-                                            tamaño = ""
-                                        st.write(f"   {tipo} {archivo.name}{tamaño}")
-                                    
-                                    if len(archivos) > 8:
-                                        st.write(f"   ... y {len(archivos) - 8} más")
+                        # Contar por tipo
+                        contadores = {
+                            'pdf': 0, 'word': 0, 'imagen': 0, 'texto': 0, 'otros': 0
+                        }
+                        
+                        for nombre_archivo in archivos_zip.keys():
+                            extension = Path(nombre_archivo).suffix.lower()
+                            if extension == '.pdf':
+                                contadores['pdf'] += 1
+                            elif extension in ['.docx', '.doc']:
+                                contadores['word'] += 1
+                            elif extension in ['.jpg', '.jpeg', '.png']:
+                                contadores['imagen'] += 1
+                            elif extension == '.txt':
+                                contadores['texto'] += 1
                             else:
-                                st.warning("📁 Carpeta vacía - Agrega archivos para procesar")
-                                
-                        except Exception as e:
-                            st.error(f"❌ Error al leer contenido: {str(e)}")
-                    else:
-                        st.error("❌ Carpeta NO encontrada")
+                                contadores['otros'] += 1
                         
-                        # Opción para crear carpeta automáticamente
-                        crear_carpeta = st.checkbox("¿Crear esta carpeta automáticamente?", value=True)
-                        if crear_carpeta:
-                            try:
-                                ruta_path.mkdir(parents=True, exist_ok=True)
-                                st.success(f"✅ Carpeta creada: {ruta_path.absolute()}")
-                                st.info("💡 Ahora puedes agregar archivos a esta carpeta")
-                            except Exception as e:
-                                st.error(f"❌ No se pudo crear la carpeta: {str(e)}")
-                            
-                except Exception as e:
-                    st.error(f"❌ Error con la ruta: {str(e)}")
-
+                        col_stats1, col_stats2, col_stats3 = st.columns(3)
+                        with col_stats1:
+                            st.metric("📄 PDF", contadores['pdf'])
+                            st.metric("📝 Word", contadores['word'])
+                        with col_stats2:
+                            st.metric("🖼️ Imágenes", contadores['imagen'])
+                            st.metric("📃 Texto", contadores['texto'])
+                        with col_stats3:
+                            st.metric("📎 Otros", contadores['otros'])
+                        
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    # Mostrar primeros archivos
+                    with st.expander("📋 Ver primeros 15 archivos", expanded=False):
+                        for i, (nombre, archivo) in enumerate(list(archivos_zip.items())[:15]):
+                            tamaño_mb = len(archivo.getvalue()) / (1024 * 1024)
+                            st.write(f"{i+1}. 📄 `{nombre}` ({tamaño_mb:.2f} MB)")
+                        if len(archivos_zip) > 15:
+                            st.write(f"... y {len(archivos_zip) - 15} archivos más")
+            
             tipos_archivo_local = st.multiselect(
                 "**Tipos de archivo a procesar** *",
                 ['.pdf', '.docx', '.doc', '.jpg', '.jpeg', '.png', '.txt'],
@@ -1779,7 +1683,7 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
         - `etiquetas`: Tags separados por comas
         - `prioridad`: Baja, Media, Alta
         
-        **Ejemplos de nombres de archivo:**
+        **Ejemplos de nombres de archivo en el ZIP:**
         - `12345678_contrato.pdf` (CI al inicio)
         - `contrato_12345678.pdf` (CI en cualquier parte)
         - `CI_12345678_identificacion.jpg` (CI específico)
@@ -1792,25 +1696,20 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
             key="archivo_csv_local_tab7"
         )
         
-        # Previsualización del CSV - SOLO MOSTRAR, NO PROCESAR
         if archivo_csv_local:
             try:
-                # Solo cargar y mostrar preview, no procesar todavía
                 content = archivo_csv_local.getvalue().decode('utf-8')
                 lines = content.split('\n')
                 
                 st.success(f"✅ Archivo CSV cargado: {len(lines)} líneas detectadas")
                 
-                # Mostrar vista previa simple sin consumir el archivo
                 with st.expander("📊 Vista previa del CSV (primeras 5 líneas)", expanded=True):
                     st.write("**Contenido del CSV:**")
-                    for i, line in enumerate(lines[:6]):  # Mostrar header + 5 filas
+                    for i, line in enumerate(lines[:6]):
                         st.text(f"Línea {i+1}: {line}")
                 
-                # Botón para cargar y validar el CSV
                 if st.button("🔍 Validar estructura del CSV", key="validar_csv_tab7"):
                     with st.spinner("Validando CSV..."):
-                        # Resetear el archivo para leerlo desde el inicio
                         archivo_csv_local.seek(0)
                         df_metadatos_local, error_csv = cargar_y_validar_csv(archivo_csv_local, "carga local")
                         
@@ -1820,7 +1719,6 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
                             st.session_state.df_metadatos_local = df_metadatos_local
                             st.success(f"✅ CSV validado correctamente: {len(df_metadatos_local)} registros de {df_metadatos_local['ci'].nunique()} CIs diferentes")
                             
-                            # Mostrar resumen del CSV validado
                             with st.expander("📋 Resumen del CSV validado", expanded=True):
                                 st.dataframe(df_metadatos_local.head(), use_container_width=True)
                                 st.write(f"**Total de registros:** {len(df_metadatos_local)}")
@@ -1830,42 +1728,34 @@ if st.session_state.db_connected and st.session_state.db_connection is not None:
             except Exception as e:
                 st.error(f"❌ Error al leer el CSV: {str(e)}")
         
-        # Botón de procesamiento - USAR EL DATAFRAME DEL SESSION_STATE
-        st.markdown("#### ⚡ Procesamiento Local")
+        # Botón de procesamiento
+        st.markdown("#### ⚡ Procesamiento Local desde ZIP")
         
-        if st.button("🚀 Iniciar Carga Local", type="primary", use_container_width=True, key="btn_carga_local_tab7"):
-            if st.session_state.df_metadatos_local is None:
+        if st.button("🚀 Iniciar Carga Local desde ZIP", type="primary", use_container_width=True, key="btn_carga_local_tab7"):
+            if 'local' not in st.session_state.archivos_zip_procesados:
+                st.error("❌ Primero debes subir y procesar un archivo ZIP")
+            elif st.session_state.df_metadatos_local is None:
                 st.error("❌ Primero debes validar el CSV usando el botón 'Validar estructura del CSV'")
-            elif not ruta_base_local:
-                st.error("❌ Debes especificar la ruta de la carpeta de archivos")
             elif not tipos_archivo_local:
                 st.error("❌ Debes seleccionar al menos un tipo de archivo")
             else:
-                # Usar el DataFrame ya validado del session_state
+                archivos_zip = st.session_state.archivos_zip_procesados['local']
                 df_metadatos_local = st.session_state.df_metadatos_local
                 
-                # Verificar que la ruta existe
-                ruta_path = Path(ruta_base_local)
-                if not ruta_path.exists():
-                    st.error(f"❌ La ruta especificada no existe: {ruta_base_local}")
-                else:
-                    # Mostrar resumen antes de procesar
-                    st.info(f"📋 **Resumen a procesar:** {len(df_metadatos_local)} registros de {df_metadatos_local['ci'].nunique()} CIs diferentes")
-                    
-                    # Procesar carga local
-                    with st.spinner("🔄 Iniciando procesamiento local..."):
-                        resultado = procesar_carga_local(
-                            db=db,
-                            ruta_base=ruta_base_local,
-                            df_metadatos=df_metadatos_local,
-                            tipos_archivo=tipos_archivo_local,
-                            max_documentos=max_documentos_local,
-                            tamaño_lote=tamaño_lote_local,
-                            patron_busqueda=patron_busqueda,
-                            sobrescribir_existentes=sobrescribir_existentes_local
-                        )
+                st.info(f"📋 **Resumen a procesar:** {len(archivos_zip)} archivos en ZIP, {len(df_metadatos_local)} registros de {df_metadatos_local['ci'].nunique()} CIs")
+                
+                with st.spinner("🔄 Iniciando procesamiento local desde ZIP..."):
+                    resultado = procesar_carga_local_zip(
+                        db=db,
+                        archivos_zip=archivos_zip,
+                        df_metadatos=df_metadatos_local,
+                        tipos_archivo=tipos_archivo_local,
+                        max_documentos=max_documentos_local,
+                        tamaño_lote=tamaño_lote_local,
+                        patron_busqueda=patron_busqueda,
+                        sobrescribir_existentes=sobrescribir_existentes_local
+                    )
 
-# ESTE "else" DEBE ESTAR FUERA DE TODAS LAS PESTAÑAS
 else:
     st.info("👈 Configura la conexión a MongoDB en la barra lateral para comenzar")
 
@@ -1877,5 +1767,3 @@ st.markdown("""
     <p>© 2024 Marathon Sports. Todos los derechos reservados.</p>
 </div>
 """, unsafe_allow_html=True)
-
-
